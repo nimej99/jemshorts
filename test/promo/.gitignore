@@ -1,0 +1,2 @@
+# 루트 .gitignore 의 전역 test_*.py 무시 규칙을 이 디렉터리에서는 해제
+!test_*.py
