@@ -1,24 +1,41 @@
-x-common-volumes: &common-volumes
-  - ./:/MoneyPrinterTurbo
+# promo-shorts 로컬 배포용 compose.
+# upstream(MPT)의 webui/api 2컨테이너 구성을 단일 app 서비스로 재작성했다.
+# (허용 수정 — docs/FORK_NOTES.md 참조)
+# release 배포 구성은 docker-compose.release.yml 이며 후속 마일스톤에서 다룬다.
 
 services:
-  webui:
+  app:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: "moneyprinterturbo-webui"
+    # 추후 GHCR 배포 이미지로 전환 시 build 블록 대신 아래 image 사용:
+    # image: ghcr.io/<owner>/promo-shorts:latest
+    container_name: promo-shorts
+    restart: unless-stopped
     ports:
+      # webui (streamlit)
       - "127.0.0.1:8501:8501"
-    command: [ "streamlit", "run", "./webui/Main.py", "--server.address=0.0.0.0", "--server.port=8501", "--browser.serverAddress=127.0.0.1", "--server.enableCORS=True", "--browser.gatherUsageStats=False", "--client.toolbarMode=minimal", "--logger.hideWelcomeMessage=True", "--server.showEmailPrompt=False" ]
-    volumes: *common-volumes
-    restart: always
-  api:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: "moneyprinterturbo-api"
-    ports:
+      # api (fastapi)
       - "127.0.0.1:8080:8080"
-    command: [ "python3", "main.py" ]
-    volumes: *common-volumes
-    restart: always
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      # 영속 스토리지. app/promo/configmap.ensure_config 가 이 경로에
+      # config.toml 을 영속화한다.
+      - ./data:/app/storage
+      # 브리지 공유 시크릿 (M0 브리지 스파이크)
+      - ./bridge-secret:/app/bridge-secret
+    environment:
+      # 브리지에서 호스트 LAN 서비스 접근에 사용. 셸에서 주입:
+      #   HOST_LAN_IP=192.168.x.x docker compose up -d
+      HOST_LAN_IP: ${HOST_LAN_IP:-}
+    # 단일 컨테이너에서 api(백그라운드) + webui(포그라운드)를 함께 구동한다.
+    # 컨테이너 내부는 0.0.0.0 으로 리슨하고, 호스트 노출은 위 ports 의
+    # 127.0.0.1 바인딩으로 제한한다.
+    command: >
+      sh -c "python3 main.py &
+             exec streamlit run ./webui/Main.py
+             --server.address=0.0.0.0 --server.port=8501
+             --browser.serverAddress=127.0.0.1 --server.enableCORS=True
+             --browser.gatherUsageStats=False --client.toolbarMode=minimal
+             --logger.hideWelcomeMessage=True --server.showEmailPrompt=False"
