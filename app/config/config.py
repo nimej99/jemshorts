@@ -11,7 +11,8 @@ from loguru import logger
 from app import __version__
 
 root_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
-config_file = f"{root_dir}/config.toml"
+# promo-shorts 포크 예외: env MPT_CONFIG_FILE 로 config 경로 오버라이드 (docs/FORK_NOTES.md)
+config_file = os.environ.get("MPT_CONFIG_FILE", f"{root_dir}/config.toml")
 _CONTAINER_CGROUP_MARKERS = ("docker", "containerd", "kubepods", "libpod", "podman")
 _DOCKER_HOST_GATEWAY_NAME = "host.docker.internal"
 _config_save_lock = threading.RLock()
@@ -277,7 +278,7 @@ def save_config():
             fd, temp_path = tempfile.mkstemp(
                 prefix=".config-",
                 suffix=".toml.tmp",
-                dir=root_dir,
+                dir=os.path.dirname(config_file) or root_dir,
             )
             with os.fdopen(fd, mode="w", encoding="utf-8") as f:
                 f.write(serialized_config)

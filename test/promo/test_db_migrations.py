@@ -96,3 +96,29 @@ def test_newer_db_version_rejected(db_path):
 
     with pytest.raises(RuntimeError):
         promo_db.connect(db_path)
+
+
+def test_failed_migration_leaves_no_partial_state(db_path, monkeypatch):
+    """깨진 마이그레이션 실패 시 같은 스크립트의 선행 문장도 롤백된다.
+
+    러너가 스크립트 적용 + user_version 범프를 한 트랜잭션으로 묶으므로,
+    두 번째 문장이 실패하면 첫 번째 CREATE TABLE 도 반영되지 않아야 한다.
+    """
+    broken_script = (
+        "CREATE TABLE mig_partial (id TEXT PRIMARY KEY);\n"
+        "CREATE TABLE broken (;\n"
+    )
+    monkeypatch.setattr(promo_db, "MIGRATIONS", [broken_script])
+    monkeypatch.setattr(promo_db, "LATEST_VERSION", 1)
+
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    try:
+        with pytest.raises(sqlite3.OperationalError):
+            promo_db.apply_migrations(conn)
+        # user_version 미증가 + 선행 문장의 테이블 미생성 (중간상태 없음)
+        assert _user_version(conn) == 0
+        assert "mig_partial" not in _table_names(conn)
+        assert not conn.in_transaction
+    finally:
+        conn.close()

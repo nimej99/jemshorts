@@ -27,20 +27,22 @@ promo-shorts 는 [MoneyPrinterTurbo](https://github.com/harry0703/MoneyPrinterTu
 | `docker-compose.yml` | 로컬 배포 구성을 단일 `app` 서비스로 재작성 (M0). upstream 의 webui/api 2컨테이너 구성을 대체. `docker-compose.release.yml`, `docker-compose.gpu.yml` 은 손대지 않음 (release 는 후속 마일스톤) |
 | `docker-compose.yml` (M0 docker boot) | 볼륨 마운트 대상 오류 수정: `/app/*` → `/MoneyPrinterTurbo/*` (이미지 WORKDIR 기준. 기존 경로는 코어 `storage_dir()` 와 연결되지 않아 영속화가 동작하지 않음). `command` 를 `scripts/docker-entrypoint.sh` 로 교체해 기동 전 `ensure_config()` 훅 연결 |
 | `scripts/docker-entrypoint.sh` | 신규 (M0). 단일 컨테이너 엔트리포인트: `ensure_config(/MoneyPrinterTurbo/storage)` 호출 후 api(백그라운드) + webui(포그라운드) 기동 |
+| `scripts/docker-entrypoint.sh` (M0 review fixes) | 경로를 셸 보간 대신 env(`PROMO_STORAGE_DIR`)로 파이썬에 전달하고, `MPT_CONFIG_FILE` 을 export 해 코어가 영속 config 를 직접 사용하게 함 |
+| `resource/fonts/NotoSansKR-Bold.otf` | 한국어 기본 폰트 추가 (M0). OFL 1.1 라이선스, 출처: [notofonts/noto-cjk](https://github.com/notofonts/noto-cjk). 코드가 아닌 번들 리소스 |
 | `.gitignore` | append 만: `data/`, `bridge-secret/` (compose 볼륨 디렉터리, M0) |
 | `.dockerignore` | append 만: `data/`, `bridge-secret/` — `COPY . .` 시 브리지 시크릿/로컬 데이터가 이미지에 구워지는 것을 방지 (M0) |
 
 ## 코어 수정 예외 (등재 필수)
 
-현재 없음.
-
-| 파일 | 사유 | diff 위치 |
+| 파일 | 사유 | 내용 / diff 위치 |
 | --- | --- | --- |
+| `app/config/config.py` | config 영속화 (M0 review fixes). symlink 우회 방식은 심볼릭 링크 미지원 파일시스템·컨테이너 재빌드 시 깨지기 쉬워 아키텍트 리뷰에서 반려됨. env 오버라이드가 최소·명시적 해법 | `config_file = os.environ.get("MPT_CONFIG_FILE", f"{root_dir}/config.toml")` 1줄 + `save_config()` 의 임시파일 디렉터리를 `os.path.dirname(config_file)` 로 변경(볼륨 경계에서 `os.replace` 원자성 유지). load/save 모두 같은 `config_file` 경로 사용 (v1-dev, M0 review fixes 커밋) |
 
 ## 참고: 코어 우회 사례
 
-- `app/config/config.py:13-14` 는 `config.toml` 경로를 레포 루트로
-  하드코딩한다. 코어를 수정하지 않고 설정을 영속 스토리지에 두기 위해
+- `app/config/config.py` 는 `config.toml` 경로를 기본으로 레포 루트에 두고
+  import 시점에 로드한다. 설정을 영속 스토리지에 두기 위해
   `app/promo/configmap.py` 의 `ensure_config()` 가 앱 기동 전에
-  `<storage>/config.toml` 을 준비하고 루트 `config.toml` 을 symlink 로
-  연결한다 (symlink 불가 시 복사 폴백).
+  `<storage>/config.toml` 을 시드(+SaaS 차단값 주입)하고, 코어는 env
+  `MPT_CONFIG_FILE`(위 코어 수정 예외)로 그 경로를 직접 읽고 쓴다.
+  과거의 루트 `config.toml` symlink 연결 방식은 제거되었다.

@@ -1,18 +1,20 @@
 """config.toml 영속화 매핑 계층.
 
-MPT 코어(app/config/config.py:13-14)는 config.toml 경로를 레포 루트로
-하드코딩하고 import 시점에 로드한다. 코어를 수정하지 않고 설정을 영속
-스토리지(컨테이너 기준 /MoneyPrinterTurbo/storage, 호스트 ./data)에 보관하기
-위해, 앱 기동 시(scripts/docker-entrypoint.sh) app.config 를 import
-하기 전에 ensure_config() 를 호출해 다음을 보장한다.
+MPT 코어(app/config/config.py)는 config.toml 경로를 기본으로 레포 루트에
+두고 import 시점에 로드하지만, 포크 예외로 env `MPT_CONFIG_FILE` 오버라이드를
+지원한다 (docs/FORK_NOTES.md '코어 수정 예외' 참조). 설정을 영속 스토리지
+(컨테이너 기준 /MoneyPrinterTurbo/storage, 호스트 ./data)에 보관하기 위해,
+앱 기동 시(scripts/docker-entrypoint.sh) `MPT_CONFIG_FILE` 을
+<storage>/config.toml 로 지정하고 app.config 를 import 하기 전에
+ensure_config() 를 호출해 다음을 보장한다.
 
-1. <storage>/config.toml 이 없으면 생성한다.
+1. <storage>/config.toml 이 없으면 생성(시드)한다.
    - 레포 루트에 기존 config.toml(일반 파일)이 있으면 그 내용을 승계하고,
    - 없으면 config.example.toml 을 복사한다.
 2. 유료 SaaS 경로 차단 기본값을 강제 주입한다 (upload_post_enabled=false 등).
-3. 레포 루트 config.toml 을 <storage>/config.toml 로 향하는 symlink 로
-   교체한다. symlink 를 지원하지 않는 파일시스템에서는 복사로 폴백한다
-   (이 경우 storage 본이 원본이며, 재기동 시 다시 동기화된다).
+
+경로 연결(코어가 영속본을 읽고 쓰게 하는 것)은 전적으로 `MPT_CONFIG_FILE`
+env 가 담당하며, 과거의 루트 config.toml symlink 방식은 제거되었다.
 """
 
 from __future__ import annotations
@@ -38,11 +40,12 @@ def ensure_config(
     storage_dir: str | os.PathLike,
     repo_root: str | os.PathLike | None = None,
 ) -> Path:
-    """storage 하위에 config.toml 을 영속화하고 루트 config.toml 을 연결한다.
+    """storage 하위에 config.toml 을 시드하고 SaaS 차단값을 주입한다.
 
     반환값은 영속 config.toml 경로(<storage_dir>/config.toml)다.
     이미 존재하는 영속 config.toml 은 보존하며, SAAS_BLOCK_DEFAULTS 만
-    강제로 덮어쓴다.
+    강제로 덮어쓴다. 코어가 이 경로를 사용하게 하려면 app.config import
+    전에 env `MPT_CONFIG_FILE` 을 이 반환 경로로 설정해야 한다.
     """
     root = Path(repo_root) if repo_root is not None else _REPO_ROOT
     storage = Path(storage_dir)
@@ -64,7 +67,6 @@ def ensure_config(
             )
 
     _inject_saas_block(persistent)
-    _link_root_config(root_cfg, persistent)
     return persistent
 
 
@@ -81,21 +83,3 @@ def _inject_saas_block(persistent: Path) -> None:
         # toml.dumps 는 주석을 보존하지 않지만, 코어 save_config 도 동일한
         # 방식으로 재직렬화하므로 포크에서 새로운 손실을 만들지는 않는다.
         persistent.write_text(toml.dumps(cfg), encoding="utf-8")
-
-
-def _link_root_config(root_cfg: Path, persistent: Path) -> None:
-    """루트 config.toml 이 영속본을 가리키도록 symlink(폴백: 복사)한다."""
-    target = persistent.resolve()
-    if root_cfg.is_symlink():
-        if root_cfg.resolve() == target:
-            return
-        root_cfg.unlink()
-    elif root_cfg.exists():
-        # 영속본이 이미 원본이므로 루트 사본은 링크로 대체한다.
-        root_cfg.unlink()
-    try:
-        root_cfg.symlink_to(target)
-    except OSError:
-        # symlink 미지원 파일시스템 폴백. storage 본이 원본이라는 전제는
-        # 유지되며, 런타임 중 루트 사본의 변경은 재기동 시 덮어써진다.
-        shutil.copyfile(persistent, root_cfg)

@@ -31,6 +31,22 @@ services:
       # 브리지에서 호스트 LAN 서비스 접근에 사용. 셸에서 주입:
       #   HOST_LAN_IP=192.168.x.x docker compose up -d
       HOST_LAN_IP: ${HOST_LAN_IP:-}
+      # 코어(app/config/config.py, 포크 예외)가 영속 config 를 직접 읽고 쓰게 한다.
+      # scripts/docker-entrypoint.sh 의 기본값과 동일하며, 여기서 명시해 고정한다.
+      MPT_CONFIG_FILE: /MoneyPrinterTurbo/storage/config.toml
+    # api(:8080)가 응답해야 healthy. 이미지에 curl 이 없을 수 있어 python3 사용.
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python3",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/docs', timeout=5)",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
     # 단일 컨테이너에서 api(백그라운드) + webui(포그라운드)를 함께 구동한다.
     # 컨테이너 내부는 0.0.0.0 으로 리슨하고, 호스트 노출은 위 ports 의
     # 127.0.0.1 바인딩으로 제한한다. 기동 전 ensure_config 훅 포함.

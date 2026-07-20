@@ -10,7 +10,8 @@
 마이그레이션:
 - PRAGMA user_version 을 스키마 버전으로 사용한다 (0 = 미초기화).
 - app.promo.migrations.MIGRATIONS 의 SQL 스크립트를 현재 버전 이후부터
-  순서대로 적용하고, 각 스크립트 적용 후 user_version 을 1씩 올린다.
+  순서대로 적용한다. 각 마이그레이션은 스크립트 적용 + user_version 범프를
+  하나의 트랜잭션으로 커밋하므로, 실패 시 중간 상태가 DB에 남지 않는다.
 - connect() 호출(기동) 시 자동 적용되며, 이미 최신이면 아무것도 하지 않는다(멱등).
 """
 
@@ -34,6 +35,27 @@ def _get_user_version(conn: sqlite3.Connection) -> int:
     return int(conn.execute("PRAGMA user_version").fetchone()[0])
 
 
+def _iter_statements(script: str):
+    """SQL 스크립트를 개별 문장으로 분할한다 (트랜잭션 내 실행용).
+
+    executescript 는 실행 전 암묵 COMMIT 을 수행해 마이그레이션 원자성을
+    깨뜨리므로 사용하지 않는다. sqlite3.complete_statement 는 토크나이저
+    수준에서 문자열/주석/트리거(BEGIN...END) 내부의 세미콜론을 구분하므로
+    단순 split(";") 과 달리 안전하다.
+    """
+    statement = ""
+    for line in script.splitlines(keepends=True):
+        statement += line
+        if sqlite3.complete_statement(statement):
+            stripped = statement.strip()
+            if stripped:
+                yield stripped
+            statement = ""
+    tail = statement.strip()
+    if tail:
+        yield tail
+
+
 def apply_migrations(conn: sqlite3.Connection) -> int:
     """현재 user_version 이후의 마이그레이션을 순서대로 적용한다.
 
@@ -48,11 +70,18 @@ def apply_migrations(conn: sqlite3.Connection) -> int:
         )
     for target in range(version + 1, LATEST_VERSION + 1):
         script = MIGRATIONS[target - 1]
-        # executescript 는 실행 전 암묵 커밋을 수행하므로 스크립트 단위로만
-        # 원자성이 보장된다. 마이그레이션은 기동 시 단일 writer 전제 하에 실행된다.
-        conn.executescript(script)
-        conn.execute(f"PRAGMA user_version = {target:d}")
-        conn.commit()
+        # 스크립트 적용 + user_version 범프를 같은 트랜잭션에서 커밋한다.
+        # (sqlite3 는 DDL 앞에서 암묵 BEGIN 을 하지 않으므로 명시적 BEGIN 필요.
+        #  PRAGMA user_version 쓰기도 트랜잭션에 포함되어 함께 롤백된다.)
+        conn.execute("BEGIN")
+        try:
+            for statement in _iter_statements(script):
+                conn.execute(statement)
+            conn.execute(f"PRAGMA user_version = {target:d}")
+            conn.commit()
+        except BaseException:
+            conn.rollback()
+            raise
     return _get_user_version(conn)
 
 
