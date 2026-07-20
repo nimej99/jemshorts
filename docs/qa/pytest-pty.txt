@@ -1,0 +1,11 @@
+^D[1m============================= test session starts ==============================[0m
+platform darwin -- Python 3.11.15, pytest-9.1.1, pluggy-1.6.0
+rootdir: /Users/kangjaemin/Desktop/workspace/promo-shorts
+configfile: pyproject.toml
+plugins: anyio-4.13.0
+[1mcollecting ... [0m[1mcollected 9 items                                                              [0m
+
+test/promo/test_configmap.py [32m.[0m[32m.[0m[32m.[0m[32m                                         [ 33%][0m
+test/promo/test_db_migrations.py [32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m                                  [100%][0m
+
+[32m============================== [32m[1m9 passed[0m[32m in 0.06s[0m[32m ===============================[0m
