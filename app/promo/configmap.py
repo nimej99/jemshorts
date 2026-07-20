@@ -2,7 +2,8 @@
 
 MPT 코어(app/config/config.py:13-14)는 config.toml 경로를 레포 루트로
 하드코딩하고 import 시점에 로드한다. 코어를 수정하지 않고 설정을 영속
-스토리지(/app/storage)에 보관하기 위해, 앱 기동 시 app.config 를 import
+스토리지(컨테이너 기준 /MoneyPrinterTurbo/storage, 호스트 ./data)에 보관하기
+위해, 앱 기동 시(scripts/docker-entrypoint.sh) app.config 를 import
 하기 전에 ensure_config() 를 호출해 다음을 보장한다.
 
 1. <storage>/config.toml 이 없으면 생성한다.

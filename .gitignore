@@ -42,3 +42,7 @@ htmlcov/
 .codegraph
 /docs/superpowers
 .understand-anything
+
+# promo-shorts (M0): compose 볼륨 마운트 대상 (docs/FORK_NOTES.md 참조)
+data/
+bridge-secret/

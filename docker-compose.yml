@@ -20,22 +20,18 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
-      # 영속 스토리지. app/promo/configmap.ensure_config 가 이 경로에
-      # config.toml 을 영속화한다.
-      - ./data:/app/storage
+      # 영속 스토리지. scripts/docker-entrypoint.sh 가 기동 전에
+      # app/promo/configmap.ensure_config 로 이 경로에 config.toml 을 영속화하고,
+      # 코어 storage_dir()(<root>/storage) 의 태스크 산출물도 여기에 쌓인다.
+      # 이미지 루트는 Dockerfile WORKDIR(/MoneyPrinterTurbo)를 따른다.
+      - ./data:/MoneyPrinterTurbo/storage
       # 브리지 공유 시크릿 (M0 브리지 스파이크)
-      - ./bridge-secret:/app/bridge-secret
+      - ./bridge-secret:/MoneyPrinterTurbo/bridge-secret
     environment:
       # 브리지에서 호스트 LAN 서비스 접근에 사용. 셸에서 주입:
       #   HOST_LAN_IP=192.168.x.x docker compose up -d
       HOST_LAN_IP: ${HOST_LAN_IP:-}
     # 단일 컨테이너에서 api(백그라운드) + webui(포그라운드)를 함께 구동한다.
     # 컨테이너 내부는 0.0.0.0 으로 리슨하고, 호스트 노출은 위 ports 의
-    # 127.0.0.1 바인딩으로 제한한다.
-    command: >
-      sh -c "python3 main.py &
-             exec streamlit run ./webui/Main.py
-             --server.address=0.0.0.0 --server.port=8501
-             --browser.serverAddress=127.0.0.1 --server.enableCORS=True
-             --browser.gatherUsageStats=False --client.toolbarMode=minimal
-             --logger.hideWelcomeMessage=True --server.showEmailPrompt=False"
+    # 127.0.0.1 바인딩으로 제한한다. 기동 전 ensure_config 훅 포함.
+    command: ["sh", "scripts/docker-entrypoint.sh"]
