@@ -1,0 +1,29 @@
+{
+  "template_id": "calm-space-mood-v1",
+  "name": "공간 무드 소개 (카페/샵)",
+  "version": 1,
+  "mood": "calm",
+  "structure": [
+    {
+      "role": "hook",
+      "duration_s": 4,
+      "script_guide": "가장 예쁜 자리나 창가 풍경을 천천히 보여주며 시작하세요. 예: '조용히 쉬고 싶은 날, 여기 어때요?'",
+      "material_slot": "video"
+    },
+    {
+      "role": "body",
+      "duration_s": 14,
+      "script_guide": "매장 곳곳(좌석, 소품, 시그니처 메뉴)을 잔잔한 호흡으로 담고, 공간이 주는 분위기를 한두 문장으로 설명하세요.",
+      "material_slot": "any"
+    },
+    {
+      "role": "cta",
+      "duration_s": 6,
+      "script_guide": "위치와 영업시간을 안내하고 저장을 유도하세요. 예: '주말 나들이 코스로 저장해 두세요.'",
+      "material_slot": "photo"
+    }
+  ],
+  "total_duration_range": [15, 30],
+  "caption_template": "{shop_name}에서 보내는 잔잔한 하루. {mood_point} 편하게 들러 쉬어 가세요.",
+  "hashtags_base": ["감성카페", "카페투어", "분위기맛집", "동네카페", "주말나들이"]
+}

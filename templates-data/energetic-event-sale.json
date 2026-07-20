@@ -1,0 +1,29 @@
+{
+  "template_id": "energetic-event-sale-v1",
+  "name": "이벤트/할인 공지 (범용)",
+  "version": 1,
+  "mood": "energetic",
+  "structure": [
+    {
+      "role": "hook",
+      "duration_s": 3,
+      "script_guide": "할인율이나 혜택 숫자를 크게 외치며 시작하세요. 예: '전 품목 최대 30% 할인!'",
+      "material_slot": "any"
+    },
+    {
+      "role": "body",
+      "duration_s": 10,
+      "script_guide": "이벤트 기간, 대상 품목/서비스, 참여 방법을 빠른 컷 전환으로 하나씩 보여주세요.",
+      "material_slot": "any"
+    },
+    {
+      "role": "cta",
+      "duration_s": 5,
+      "script_guide": "마감 임박을 강조하고 행동을 유도하세요. 예: '이번 주 일요일까지! 놓치면 후회해요.'",
+      "material_slot": "photo"
+    }
+  ],
+  "total_duration_range": [15, 30],
+  "caption_template": "{shop_name} {event_name} 진행 중! {benefit} ({period} 한정)",
+  "hashtags_base": ["할인이벤트", "세일정보", "이벤트", "동네가게", "혜택"]
+}

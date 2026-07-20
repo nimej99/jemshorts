@@ -1,0 +1,29 @@
+{
+  "template_id": "upbeat-new-menu-v1",
+  "name": "신메뉴 공개 (음식점)",
+  "version": 1,
+  "mood": "upbeat",
+  "structure": [
+    {
+      "role": "hook",
+      "duration_s": 3,
+      "script_guide": "신메뉴 클로즈업 한 컷으로 시선을 붙잡으세요. 예: '드디어 나왔다, 우리 가게 신메뉴!'",
+      "material_slot": "video"
+    },
+    {
+      "role": "body",
+      "duration_s": 12,
+      "script_guide": "조리 과정이나 완성 접시를 2~3컷으로 보여주고, 맛 포인트(매콤/담백 등)와 가격을 한 문장씩 소개하세요.",
+      "material_slot": "any"
+    },
+    {
+      "role": "cta",
+      "duration_s": 5,
+      "script_guide": "출시 기념 혜택과 방문 유도 멘트로 마무리하세요. 예: '이번 주말까지 시식 이벤트, 지금 방문하세요!'",
+      "material_slot": "photo"
+    }
+  ],
+  "total_duration_range": [15, 30],
+  "caption_template": "{shop_name} 신메뉴 '{menu_name}' 출시! {highlight} 지금 매장에서 만나보세요.",
+  "hashtags_base": ["신메뉴", "신메뉴출시", "맛집", "동네맛집", "오늘뭐먹지"]
+}
