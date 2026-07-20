@@ -31,7 +31,7 @@
 - **entrypoint 경화**: storage 경로를 셸 보간 대신 env(`PROMO_STORAGE_DIR`)로
   파이썬에 전달.
 - **healthcheck 추가**: compose 에 api `:8080` 대상 python3 urllib healthcheck.
-- 위 항목들은 Docker 재검증 미수행 상태이며, 재검증은 별도 수행 예정.
+- → 아래 "재검증 (리뷰 반영 후)" 섹션에서 수행 완료.
 
 ## 인프라 이슈 기록 (환경 한정, 레포 무관)
 
