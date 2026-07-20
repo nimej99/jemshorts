@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import uuid
 from pathlib import Path
 from typing import Sequence
 
@@ -136,6 +137,7 @@ def compose_materials(
     brandkit: BrandKit,
     stock_paths: Sequence[str],
     storage_local_dir: str | Path,
+    compose_id: str | None = None,
 ) -> tuple[list[MaterialInfo], int, bool]:
     """템플릿 섹션 순서대로 브랜드/스톡 소재를 배치해 MPT 입력을 만든다.
 
@@ -146,6 +148,8 @@ def compose_materials(
       확보된 소재를 순환 재사용한다.
     - 브랜드 소재가 0개면 스톡만으로 구성하고 photo_warning=True 를
       반환한다 (조용한 강등 금지 — 경고 플래그 전파).
+    - compose_id: 복사본 파일명에 포함되는 호출별 식별자. 미지정 시
+      uuid4 앞 8자를 사용한다 — 호출 간 복사본 파일명 충돌/덮어쓰기 방지.
 
     반환: (video_materials, used_brand_count, photo_warning)
     - video_materials: MaterialInfo(provider="local") 리스트 (섹션 순서)
@@ -157,8 +161,15 @@ def compose_materials(
     local_dir_real = os.path.realpath(str(storage_local_dir))
     os.makedirs(local_dir_real, exist_ok=True)
 
-    brand_pool = _build_pool(brandkit.photos, local_dir_real, "brand", is_brand=True)
-    stock_pool = _build_pool(stock_paths, local_dir_real, "stock", is_brand=False)
+    if compose_id is None:
+        compose_id = uuid.uuid4().hex[:8]
+
+    brand_pool = _build_pool(
+        brandkit.photos, local_dir_real, f"brand-{compose_id}", is_brand=True
+    )
+    stock_pool = _build_pool(
+        stock_paths, local_dir_real, f"stock-{compose_id}", is_brand=False
+    )
 
     combined = brand_pool + stock_pool
     if not combined:
@@ -172,6 +183,10 @@ def compose_materials(
         if picked is None:
             # 모든 소재를 소진했으면 확보된 소재를 순환 재사용한다.
             picked = combined[len(ordered) % len(combined)]
+            logger.warning(
+                f"소재({len(combined)}개)가 섹션 수보다 적어 순환 재사용: "
+                f"section[{len(ordered)}] '{section.material_slot}' <- {picked.path}"
+            )
         ordered.append(picked)
 
     used_brand_count = len({item.path for item in ordered if item.is_brand})

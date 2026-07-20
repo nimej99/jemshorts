@@ -42,8 +42,10 @@ class _FakeResponse:
         self._body = body
         self.headers = email.message_from_string(f"Content-Type: {content_type}\n\n")
 
-    def read(self):
-        return self._body
+    def read(self, n=None):
+        if n is None:
+            return self._body
+        return self._body[:n]
 
     def __enter__(self):
         return self
@@ -52,7 +54,21 @@ class _FakeResponse:
         return False
 
 
-def _mock_urlopen(monkeypatch, response=None, error=None):
+PUBLIC_IP = "93.184.216.34"
+
+
+def _mock_getaddrinfo(monkeypatch, resolved_ip):
+    """호스트 resolve 를 mock 한다 (실 DNS 조회 0)."""
+    monkeypatch.setattr(
+        crawler.socket,
+        "getaddrinfo",
+        lambda host, port, *args, **kwargs: [
+            (crawler.socket.AF_INET, crawler.socket.SOCK_STREAM, 6, "", (resolved_ip, 0))
+        ],
+    )
+
+
+def _mock_urlopen(monkeypatch, response=None, error=None, resolved_ip=PUBLIC_IP):
     calls = []
 
     def fake_urlopen(url, timeout=None):
@@ -61,7 +77,8 @@ def _mock_urlopen(monkeypatch, response=None, error=None):
             raise error
         return response
 
-    monkeypatch.setattr(crawler.urllib.request, "urlopen", fake_urlopen)
+    _mock_getaddrinfo(monkeypatch, resolved_ip)
+    monkeypatch.setattr(crawler, "_urlopen", fake_urlopen)
     return calls
 
 
@@ -115,6 +132,76 @@ def test_crawl_empty_page_is_failed(monkeypatch):
     _mock_urlopen(monkeypatch, response=_FakeResponse(b""))
     result = crawler.crawl("https://example.com/empty")
     assert result.status == "failed"
+
+
+# ---------------------------------------------------------------------------
+# SSRF 방어 (전부 mock — 실 네트워크/실 DNS 0)
+# ---------------------------------------------------------------------------
+
+def test_crawl_rejects_file_scheme(monkeypatch):
+    """file:// 등 비 http/https 스킴은 요청 없이 status=failed."""
+    calls = _mock_urlopen(
+        monkeypatch, response=_FakeResponse(FULL_OG_HTML.encode("utf-8"))
+    )
+    result = crawler.crawl("file:///etc/passwd")
+    assert result.status == "failed"
+    assert any("스킴" in warning for warning in result.warnings)
+    assert calls == []  # 요청 자체가 나가지 않는다
+
+
+def test_crawl_rejects_loopback_ip(monkeypatch):
+    """127.0.0.1 (루프백) 은 요청 없이 status=failed."""
+    calls = _mock_urlopen(
+        monkeypatch,
+        response=_FakeResponse(FULL_OG_HTML.encode("utf-8")),
+        resolved_ip="127.0.0.1",
+    )
+    result = crawler.crawl("http://127.0.0.1:8080/admin")
+    assert result.status == "failed"
+    assert any("차단된 IP" in warning for warning in result.warnings)
+    assert calls == []
+
+
+def test_crawl_rejects_private_ip_after_resolve(monkeypatch):
+    """호스트가 사설 IP(10.x)로 resolve 되면 요청 없이 status=failed."""
+    calls = _mock_urlopen(
+        monkeypatch,
+        response=_FakeResponse(FULL_OG_HTML.encode("utf-8")),
+        resolved_ip="10.20.30.40",
+    )
+    result = crawler.crawl("https://internal.example.com/shop")
+    assert result.status == "failed"
+    assert any("차단된 IP" in warning for warning in result.warnings)
+    assert calls == []
+
+
+def test_redirect_hop_to_private_ip_is_blocked(monkeypatch):
+    """리다이렉트 hop 의 새 URL 도 동일한 SSRF 검증을 통과해야 한다."""
+    _mock_getaddrinfo(monkeypatch, "10.0.0.5")
+    handler = crawler._SSRFGuardRedirectHandler()
+    with pytest.raises(crawler.SSRFBlockedError, match="차단된 IP"):
+        handler.redirect_request(
+            None, None, 302, "Found", {}, "http://internal.example.com/next"
+        )
+
+
+def test_crawl_truncates_body_at_2mb(monkeypatch):
+    """응답 read 는 2MB 상한으로 절단된다 (앞부분 메타 태그 파싱은 유지)."""
+    read_sizes = []
+
+    class _RecordingResponse(_FakeResponse):
+        def read(self, n=None):
+            read_sizes.append(n)
+            return super().read(n)
+
+    big_body = FULL_OG_HTML.encode("utf-8") + b"<!--" + b"x" * (3 * 1024 * 1024)
+    _mock_urlopen(monkeypatch, response=_RecordingResponse(big_body))
+
+    result = crawler.crawl("https://example.com/huge")
+
+    assert read_sizes == [crawler.MAX_RESPONSE_BYTES]
+    assert result.status == "ok"
+    assert result.fields["og_title"] == "우리동네 카페"
 
 
 # ---------------------------------------------------------------------------

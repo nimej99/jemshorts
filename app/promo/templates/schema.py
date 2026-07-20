@@ -34,6 +34,10 @@ VALID_MOODS = ("upbeat", "calm", "energetic")
 VALID_ROLES = ("hook", "body", "cta")
 VALID_MATERIAL_SLOTS = ("photo", "video", "any")
 
+# 필수 섹션 역할 — 게이트(quality.gates.structural_gate)와 공유하는 단일 계약.
+# body 는 선택이다: hook + cta 2섹션 템플릿도 스키마상 유효하다.
+REQUIRED_ROLES = ("hook", "cta")
+
 # 전역 가드레일: 숏폼 총 길이 허용 범위 (초)
 MIN_TOTAL_DURATION_S = 10
 MAX_TOTAL_DURATION_S = 60
@@ -160,12 +164,11 @@ def validate_template(data: object, source: str = "<template>") -> Template:
     )
 
     roles = [section.role for section in sections]
-    if "hook" not in roles:
-        raise _err(source, "hook 섹션은 필수입니다")
+    for role in REQUIRED_ROLES:
+        if role not in roles:
+            raise _err(source, f"{role} 섹션은 필수입니다")
     if roles[0] != "hook":
         raise _err(source, "hook 섹션은 첫 번째에 위치해야 합니다")
-    if "cta" not in roles:
-        raise _err(source, "cta 섹션은 필수입니다")
 
     total = sum(section.duration_s for section in sections)
     if not (MIN_TOTAL_DURATION_S <= total <= MAX_TOTAL_DURATION_S):
@@ -185,6 +188,12 @@ def validate_template(data: object, source: str = "<template>") -> Template:
     lo, hi = float(range_raw[0]), float(range_raw[1])
     if not (0 < lo <= hi):
         raise _err(source, f"'total_duration_range' [{lo:g}, {hi:g}] 는 0 < 최소 <= 최대 여야 합니다")
+    if lo < MIN_TOTAL_DURATION_S or hi > MAX_TOTAL_DURATION_S:
+        raise _err(
+            source,
+            f"'total_duration_range' [{lo:g}, {hi:g}] 는 전역 허용 범위"
+            f"({MIN_TOTAL_DURATION_S}~{MAX_TOTAL_DURATION_S}초) 안에 있어야 합니다",
+        )
     if not (lo <= total <= hi):
         raise _err(
             source,

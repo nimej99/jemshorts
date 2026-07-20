@@ -3,8 +3,9 @@
 - 1층 technical_gate: 렌더 산출물을 ffprobe(subprocess)로 실측 검증.
   해상도(기본 1080x1920), duration 이 템플릿 total_duration_range±허용오차
   내, 비디오+오디오 스트림 존재.
-- 2층 structural_gate: 스크립트 구조(hook/body/cta 섹션 존재)와 소재
-  구성(브랜드 소재 >= 1)을 검증.
+- 2층 structural_gate: 스크립트 구조(필수 역할 섹션 존재 — 계약은
+  templates.schema.REQUIRED_ROLES 단일 상수)와 소재 구성(브랜드 소재 >= 1)을
+  검증.
 
 조용한 강등 금지 원칙: 검증 완화(fail -> warning 강등)가 일어나면 그
 사유를 반드시 GateResult.warnings 에 기록한다. 기록 없는 완화는 없다.
@@ -18,7 +19,9 @@ import subprocess
 from dataclasses import dataclass, field
 from typing import Sequence
 
-REQUIRED_ROLES = ("hook", "body", "cta")
+from app.promo.templates.schema import REQUIRED_ROLES
+
+_FFPROBE_TIMEOUT_S = 30
 
 
 @dataclass(frozen=True)
@@ -59,6 +62,7 @@ def _ffprobe(video_path: str) -> dict:
         ],
         capture_output=True,
         text=True,
+        timeout=_FFPROBE_TIMEOUT_S,
     )
     if result.returncode != 0:
         raise RuntimeError(f"ffprobe failed ({result.returncode}): {result.stderr.strip()}")
@@ -76,6 +80,11 @@ def technical_gate(video_path: str, expected: TechnicalExpectation) -> GateResul
 
     try:
         probe = _ffprobe(video_path)
+    except subprocess.TimeoutExpired:
+        return GateResult(
+            passed=False,
+            failures=[f"ffprobe 실측 실패: timeout {_FFPROBE_TIMEOUT_S}초 초과"],
+        )
     except (RuntimeError, OSError, json.JSONDecodeError) as exc:
         return GateResult(passed=False, failures=[f"ffprobe 실측 실패: {exc}"])
 
@@ -129,7 +138,8 @@ def structural_gate(
 ) -> GateResult:
     """스크립트 구조와 소재 구성을 검증한다.
 
-    - hook/body/cta 섹션이 모두 존재해야 한다.
+    - 필수 역할 섹션(templates.schema.REQUIRED_ROLES — hook, cta)이 모두
+      존재해야 한다 (body 는 선택 — 스키마 계약과 동일).
     - video_materials 는 비어 있으면 안 된다.
     - 브랜드 소재는 최소 1개. 0개인 경우 photo_warning 이 동반될 때만
       warning 으로 강등하며 (사유를 warnings 에 기록 — 조용한 강등 금지),

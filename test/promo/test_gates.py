@@ -9,13 +9,14 @@ import subprocess
 
 import pytest
 
+from app.promo.quality import gates
 from app.promo.quality.gates import (
     GateResult,
     TechnicalExpectation,
     structural_gate,
     technical_gate,
 )
-from app.promo.templates.schema import Section
+from app.promo.templates.schema import REQUIRED_ROLES, Section, validate_template
 
 pytestmark = pytest.mark.skipif(
     shutil.which("ffmpeg") is None or shutil.which("ffprobe") is None,
@@ -90,6 +91,25 @@ def test_technical_gate_missing_file_fail(tmp_path):
     assert any("파일이 없습니다" in failure for failure in result.failures)
 
 
+def test_technical_gate_ffprobe_timeout_converges_to_failure(tmp_path, monkeypatch):
+    """ffprobe hang(TimeoutExpired)은 예외 전파 없이 failure 로 수렴한다."""
+    clip = tmp_path / "hang.mp4"
+    clip.write_bytes(b"dummy")
+    seen_kwargs = {}
+
+    def fake_run(cmd, **kwargs):
+        seen_kwargs.update(kwargs)
+        raise subprocess.TimeoutExpired(cmd=cmd, timeout=kwargs.get("timeout"))
+
+    monkeypatch.setattr(gates.subprocess, "run", fake_run)
+
+    result = technical_gate(str(clip), TechnicalExpectation(duration_range=(1, 2)))
+
+    assert seen_kwargs.get("timeout") == 30
+    assert result.passed is False
+    assert any("timeout" in failure for failure in result.failures)
+
+
 # ---------------------------------------------------------------------------
 # structural_gate (ffprobe 불필요 — 순수 로직)
 # ---------------------------------------------------------------------------
@@ -161,3 +181,44 @@ def test_structural_gate_accepts_dict_sections():
         used_brand_count=1,
     )
     assert result.passed is True
+
+
+def test_gate_and_schema_share_required_roles_contract():
+    """게이트 필수 역할 계약은 schema.REQUIRED_ROLES 단일 상수다 (body 선택)."""
+    assert gates.REQUIRED_ROLES is REQUIRED_ROLES
+    assert REQUIRED_ROLES == ("hook", "cta")
+
+
+def test_structural_gate_passes_schema_valid_two_section_template():
+    """스키마상 유효한 hook+cta 2섹션 템플릿이 구조 게이트를 통과한다."""
+    template = validate_template(
+        {
+            "template_id": "two-section-v1",
+            "name": "2섹션 템플릿",
+            "version": 1,
+            "mood": "upbeat",
+            "structure": [
+                {
+                    "role": "hook",
+                    "duration_s": 5,
+                    "script_guide": "훅",
+                    "material_slot": "any",
+                },
+                {
+                    "role": "cta",
+                    "duration_s": 5,
+                    "script_guide": "행동 유도",
+                    "material_slot": "any",
+                },
+            ],
+            "total_duration_range": [10, 60],
+            "caption_template": "{shop_name} 캡션",
+            "hashtags_base": ["테스트"],
+        }
+    )
+    result = structural_gate(
+        template.structure,
+        ["m1.mp4"],
+        used_brand_count=1,
+    )
+    assert result == GateResult(passed=True, failures=[], warnings=[])

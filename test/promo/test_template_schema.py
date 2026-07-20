@@ -158,13 +158,51 @@ def test_fewer_than_two_sections_rejected():
         validate_template(data)
 
 
+def test_total_duration_range_hi_above_60_rejected():
+    """total_duration_range 상한은 60초로 클램프된다: [10, 100] 거부."""
+    data = _valid_template(total_duration_range=[10, 100])
+    with pytest.raises(TemplateValidationError, match="전역 허용 범위"):
+        validate_template(data)
+
+
+def test_total_duration_range_lo_below_10_rejected():
+    """total_duration_range 하한은 10초로 클램프된다: [5, 60] 거부."""
+    data = _valid_template(total_duration_range=[5, 60])
+    with pytest.raises(TemplateValidationError, match="전역 허용 범위"):
+        validate_template(data)
+
+
+def test_total_duration_range_full_bounds_allowed():
+    """경계값 [10, 60] 은 허용된다."""
+    template = validate_template(_valid_template(total_duration_range=[10, 60]))
+    assert template.total_duration_range == (10.0, 60.0)
+
+
 # ---------------------------------------------------------------------------
 # (c) curated_fetch 폴백 (실제 네트워크 호출 없음 - urlopen 전부 mock)
+# 원격 fetch 는 base_url 명시 주입 시에만 활성화된다.
 # ---------------------------------------------------------------------------
+
+REMOTE_BASE_URL = "https://curated.example/repo"
 
 
 def _raise_url_error(*args, **kwargs):
     raise urllib.error.URLError("mocked network failure")
+
+
+def test_default_no_base_url_skips_remote_and_uses_bundle(tmp_path, monkeypatch, caplog):
+    """base_url 미주입(기본 None)이면 원격 시도 없이 캐시→번들 폴백 (info 로그)."""
+
+    def _forbid_urlopen(*args, **kwargs):
+        raise AssertionError("base_url=None 인데 원격 fetch 가 호출되었습니다")
+
+    monkeypatch.setattr(urllib.request, "urlopen", _forbid_urlopen)
+    caplog.set_level(logging.INFO, logger=curated_fetch.logger.name)
+
+    templates = curated_fetch.fetch_curated_templates(cache_dir=tmp_path / "cache")
+
+    assert {t.template_id for t in templates} == SEED_IDS
+    assert "원격 fetch 없이 캐시/번들 사용" in caplog.text
 
 
 def test_network_failure_falls_back_to_bundle(tmp_path, monkeypatch, caplog):
@@ -172,7 +210,9 @@ def test_network_failure_falls_back_to_bundle(tmp_path, monkeypatch, caplog):
     monkeypatch.setattr(urllib.request, "urlopen", _raise_url_error)
     caplog.set_level(logging.WARNING, logger=curated_fetch.logger.name)
 
-    templates = curated_fetch.fetch_curated_templates(cache_dir=tmp_path / "cache")
+    templates = curated_fetch.fetch_curated_templates(
+        base_url=REMOTE_BASE_URL, cache_dir=tmp_path / "cache"
+    )
 
     assert {t.template_id for t in templates} == SEED_IDS
     assert "원격 fetch 실패" in caplog.text
@@ -193,7 +233,9 @@ def test_network_failure_prefers_cache_and_skips_invalid(tmp_path, monkeypatch, 
     monkeypatch.setattr(urllib.request, "urlopen", _raise_url_error)
     caplog.set_level(logging.WARNING, logger=curated_fetch.logger.name)
 
-    templates = curated_fetch.fetch_curated_templates(cache_dir=cache)
+    templates = curated_fetch.fetch_curated_templates(
+        base_url=REMOTE_BASE_URL, cache_dir=cache
+    )
 
     assert [t.template_id for t in templates] == ["test-template-v1"]
     assert "스키마 위반 템플릿 skip: bad.json" in caplog.text
@@ -218,7 +260,9 @@ def test_remote_fetch_skips_invalid_template(tmp_path, monkeypatch, caplog):
     caplog.set_level(logging.WARNING, logger=curated_fetch.logger.name)
     cache = tmp_path / "cache"
 
-    templates = curated_fetch.fetch_curated_templates(cache_dir=cache)
+    templates = curated_fetch.fetch_curated_templates(
+        base_url=REMOTE_BASE_URL, cache_dir=cache
+    )
 
     assert [t.template_id for t in templates] == ["test-template-v1"]
     assert "스키마 위반 템플릿 skip: bad.json" in caplog.text

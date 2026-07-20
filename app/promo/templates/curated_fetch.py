@@ -1,11 +1,15 @@
 """큐레이션 템플릿 원격 fetch + 캐시/번들 폴백.
 
-GitHub raw URL(설정 가능한 base_url) 에서 index.json 과 개별 템플릿 JSON 을
-가져와 storage 하위 캐시 디렉터리에 저장한다.
+원격 fetch 는 base_url 을 명시 주입한 경우에만 활성화된다. base_url=None
+(기본)이면 원격 시도 없이 캐시 → 번들로 바로 폴백한다 (의도된 로컬 전용
+동작이므로 warning 이 아닌 info 로그).
+
+base_url 이 주어지면 (예: 큐레이션 저장소 raw URL) index.json 과 개별
+템플릿 JSON 을 가져와 storage 하위 캐시 디렉터리에 저장한다.
 
 폴백 순서:
-1. 원격 fetch (index.json + 개별 템플릿). 스키마 위반 템플릿은 개별 skip + warning.
-2. 원격 실패(네트워크 오류/4xx/index 형식 오류) 또는 유효 템플릿 0개 → 캐시 디렉터리.
+1. 원격 fetch (base_url 명시 주입 시에만). 스키마 위반 템플릿은 개별 skip + warning.
+2. 원격 미사용/실패(네트워크 오류/4xx/index 형식 오류) 또는 유효 템플릿 0개 → 캐시 디렉터리.
 3. 캐시도 비어 있으면 → 레포 번들 templates-data/.
 
 네트워크는 stdlib urllib 만 사용하며 timeout 은 10초다.
@@ -28,10 +32,6 @@ from app.promo.templates.schema import (
 
 logger = logging.getLogger(__name__)
 
-# 큐레이션 저장소 raw base URL. 배포 시 실제 저장소 주소로 교체/주입한다.
-DEFAULT_BASE_URL = (
-    "https://raw.githubusercontent.com/promo-shorts/curated-templates/main"
-)
 DEFAULT_TIMEOUT_S = 10
 INDEX_FILENAME = "index.json"
 CACHE_SUBDIR = "promo_templates"
@@ -103,20 +103,27 @@ def _load_dir_lenient(directory: Path) -> list[Template]:
 
 
 def fetch_curated_templates(
-    base_url: str = DEFAULT_BASE_URL,
+    base_url: str | None = None,
     cache_dir: str | Path | None = None,
     timeout: float = DEFAULT_TIMEOUT_S,
 ) -> list[Template]:
-    """큐레이션 템플릿 목록을 반환한다 (원격 → 캐시 → 번들 폴백)."""
+    """큐레이션 템플릿 목록을 반환한다 (원격 → 캐시 → 번들 폴백).
+
+    base_url 이 None(기본)이면 원격 fetch 를 시도하지 않고 캐시 → 번들로
+    바로 폴백한다 (모듈 docstring 참조).
+    """
     cache = Path(cache_dir) if cache_dir is not None else _default_cache_dir()
 
-    try:
-        templates = _fetch_remote(base_url, cache, timeout)
-        if templates:
-            return templates
-        logger.warning("원격 큐레이션 템플릿에 유효 항목이 없습니다 - 폴백 진행")
-    except _FETCH_ERRORS as exc:
-        logger.warning("큐레이션 템플릿 원격 fetch 실패 (%s) - 캐시 폴백 시도", exc)
+    if base_url is None:
+        logger.info("base_url 미지정 - 원격 fetch 없이 캐시/번들 사용")
+    else:
+        try:
+            templates = _fetch_remote(base_url, cache, timeout)
+            if templates:
+                return templates
+            logger.warning("원격 큐레이션 템플릿에 유효 항목이 없습니다 - 폴백 진행")
+        except _FETCH_ERRORS as exc:
+            logger.warning("큐레이션 템플릿 원격 fetch 실패 (%s) - 캐시 폴백 시도", exc)
 
     cached = _load_dir_lenient(cache)
     if cached:

@@ -6,8 +6,10 @@
 """
 
 import os
+import re
 
 import pytest
+from loguru import logger
 
 from app.promo.brandkit.models import BrandKit
 from app.promo.materials import compose_materials
@@ -83,12 +85,18 @@ def test_section_order_prefers_brand_and_matches_slots(dirs, template):
     stock = _touch(stock_dir / "s1.mp4")
     kit = BrandKit(business_name="가게", photos=[photo, clip])
 
-    materials, _, _ = compose_materials(template, kit, [stock], local_dir)
+    materials, _, _ = compose_materials(
+        template, kit, [stock], local_dir, compose_id="cid1"
+    )
 
     names = [os.path.basename(m.url) for m in materials]
     # hook(video) -> 브랜드 영상, body(any) -> 남은 브랜드 사진,
     # cta(photo) -> photo 소재 소진으로 스톡 영상 대체 (순서 결정적)
-    assert names == ["brand-01-b2.mp4", "brand-00-b1.jpg", "stock-00-s1.mp4"]
+    assert names == [
+        "brand-cid1-01-b2.mp4",
+        "brand-cid1-00-b1.jpg",
+        "stock-cid1-00-s1.mp4",
+    ]
 
 
 def test_photo_warning_propagates_from_empty_brandkit(dirs, template):
@@ -98,14 +106,14 @@ def test_photo_warning_propagates_from_empty_brandkit(dirs, template):
     assert kit.photo_warning is True
 
     materials, used_brand_count, photo_warning = compose_materials(
-        template, kit, [stock], local_dir
+        template, kit, [stock], local_dir, compose_id="cid1"
     )
 
     assert photo_warning is True
     assert used_brand_count == 0
     # 스톡만으로 섹션 수만큼 구성 (순환 재사용)
     assert len(materials) == len(template.structure)
-    assert all("stock-00-s1.mp4" in m.url for m in materials)
+    assert all("stock-cid1-00-s1.mp4" in m.url for m in materials)
 
 
 def test_missing_brand_files_are_skipped_and_flagged(dirs, template):
@@ -131,7 +139,7 @@ def test_file_already_inside_local_dir_is_not_duplicated(dirs, template):
     kit = BrandKit(business_name="가게", photos=[inside])
 
     materials, used_brand_count, _ = compose_materials(
-        template, kit, [stock], local_dir
+        template, kit, [stock], local_dir, compose_id="cid1"
     )
 
     assert used_brand_count == 1
@@ -140,7 +148,7 @@ def test_file_already_inside_local_dir_is_not_duplicated(dirs, template):
     # 복사본이 새로 생기지 않는다
     assert sorted(p.name for p in local_dir.iterdir()) == [
         "already.mp4",
-        "stock-00-s1.mp4",
+        "stock-cid1-00-s1.mp4",
     ]
 
 
@@ -149,3 +157,49 @@ def test_no_materials_at_all_raises(dirs, template):
     kit = BrandKit(business_name="가게", photos=[])
     with pytest.raises(ValueError):
         compose_materials(template, kit, [], local_dir)
+
+
+def test_distinct_compose_ids_avoid_copy_collisions(dirs, template):
+    """호출별 compose_id 가 복사본 파일명에 포함되어 호출 간 충돌이 없다."""
+    _, stock_dir, local_dir = dirs
+    stock = _touch(stock_dir / "s1.mp4")
+    kit = BrandKit(business_name="가게", photos=[])
+
+    compose_materials(template, kit, [stock], local_dir, compose_id="run1")
+    compose_materials(template, kit, [stock], local_dir, compose_id="run2")
+
+    assert sorted(p.name for p in local_dir.iterdir()) == [
+        "stock-run1-00-s1.mp4",
+        "stock-run2-00-s1.mp4",
+    ]
+
+
+def test_default_compose_id_is_uuid4_hex8(dirs, template):
+    """compose_id 미지정 시 uuid4 앞 8자(hex)가 파일명에 들어간다."""
+    _, stock_dir, local_dir = dirs
+    stock = _touch(stock_dir / "s1.mp4")
+    kit = BrandKit(business_name="가게", photos=[])
+
+    compose_materials(template, kit, [stock], local_dir)
+    compose_materials(template, kit, [stock], local_dir)
+
+    names = sorted(p.name for p in local_dir.iterdir())
+    assert len(names) == 2  # 호출 간 파일명이 겹치지 않는다
+    for name in names:
+        assert re.fullmatch(r"stock-[0-9a-f]{8}-00-s1\.mp4", name)
+
+
+def test_cyclic_reuse_emits_warning_log(dirs, template):
+    """소재가 섹션 수보다 적어 순환 재사용될 때 warning 로그를 남긴다."""
+    _, stock_dir, local_dir = dirs
+    stock = _touch(stock_dir / "s1.mp4")
+    kit = BrandKit(business_name="가게", photos=[])
+
+    messages = []
+    sink_id = logger.add(lambda m: messages.append(str(m)), level="WARNING")
+    try:
+        compose_materials(template, kit, [stock], local_dir, compose_id="cid1")
+    finally:
+        logger.remove(sink_id)
+
+    assert any("순환 재사용" in message for message in messages)
