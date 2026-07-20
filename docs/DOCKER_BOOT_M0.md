@@ -46,3 +46,10 @@ curl http://127.0.0.1:8080/docs   # 200
 curl http://127.0.0.1:8501        # 200
 docker compose down
 ```
+
+## 재검증 (리뷰 반영 후, 2026-07-20)
+
+- 재빌드(캐시) 후 `compose up -d`: api `/docs` 200
+- 컨테이너 내 `save_config()`로 마커 기록 → `compose down` → `up -d` 재생성 → 마커 보존 확인 (`PERSIST_ACROSS_RECREATE_OK`)
+- 호스트 `./data/config.toml`에 동일 마커 반영 확인 → HIGH P1(런타임 설정 유실) 해소 실증
+- healthcheck 포함 기동 정상, 검증 후 `compose down` + Docker Desktop 종료(리소스 반납)
