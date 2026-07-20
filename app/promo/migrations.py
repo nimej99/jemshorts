@@ -38,8 +38,18 @@ CREATE TABLE IF NOT EXISTS fallback_log (
 );
 """
 
+# v2 스키마: brandkit 단일행 테이블 (단순 JSON 저장 전략 — 스키마 변화에 유연)
+_V2 = """
+CREATE TABLE IF NOT EXISTS brandkit (
+    id           INTEGER PRIMARY KEY CHECK (id = 1),
+    payload_json TEXT NOT NULL,
+    updated_at   TEXT NOT NULL DEFAULT (datetime('now'))
+);
+"""
+
 MIGRATIONS: list[str] = [
     _V1,
+    _V2,
 ]
 
 # 최신 스키마 버전 == 마이그레이션 개수 (user_version 목표값)
