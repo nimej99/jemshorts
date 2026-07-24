@@ -212,6 +212,37 @@ def validate_template(data: object, source: str = "<template>") -> Template:
     )
 
 
+def load_raw(path: str | Path) -> dict:
+    """JSON 파일 하나를 읽어 검증까지 통과한 원본 dict 를 반환한다.
+
+    플랜 영속화(payload 에 템플릿 스냅샷 저장)처럼 원본 dict 가 필요한
+    호출자용. 검증은 load_template 과 동일하게 강제한다.
+    """
+    path = Path(path)
+    try:
+        raw = path.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise _err(path.name, f"파일을 읽을 수 없습니다 ({exc})") from exc
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise _err(path.name, f"JSON 파싱 실패 ({exc})") from exc
+    validate_template(data, source=path.name)
+    return data
+
+
+def load_all_raw(directory: str | Path) -> list[dict]:
+    """디렉터리의 *.json 템플릿을 검증 후 원본 dict 목록으로 반환한다 (엄격 모드)."""
+    directory = Path(directory)
+    if not directory.is_dir():
+        raise _err(str(directory), "템플릿 디렉터리가 존재하지 않습니다")
+    return [
+        load_raw(path)
+        for path in sorted(directory.glob("*.json"))
+        if path.name != "index.json"
+    ]
+
+
 def load_template(path: str | Path) -> Template:
     """JSON 파일 하나를 읽어 검증 후 Template 을 반환한다."""
     path = Path(path)

@@ -26,8 +26,10 @@ from loguru import logger
 from pydantic import BaseModel, Field
 
 from app.promo import db as promo_db
-from app.promo import pipeline, plans, uploads
+from app.promo import pipeline, plans, scheduler, uploads
+from app.promo.brandkit import crawler as brandkit_crawler
 from app.promo.brandkit import store as brandkit_store
+from app.promo.brandkit.models import BrandKit
 from app.promo.research import (
     ResearchToolMissingError,
     analyze_reference,
@@ -37,6 +39,7 @@ from app.promo.research import (
 )
 from app.promo.templates.schema import (
     TemplateValidationError,
+    load_all_raw,
     validate_template,
 )
 from app.utils import utils
@@ -50,19 +53,10 @@ def templates_data_dir() -> str:
 
 def _load_raw_templates() -> list[dict]:
     """templates-data/*.json 원본 dict 목록 (검증 통과분만, 파일명 순)."""
-    directory = templates_data_dir()
-    if not os.path.isdir(directory):
-        raise HTTPException(status_code=500, detail="templates-data 디렉터리가 없습니다")
-    result = []
-    for name in sorted(os.listdir(directory)):
-        if not name.endswith(".json") or name == "index.json":
-            continue
-        path = os.path.join(directory, name)
-        with open(path, encoding="utf-8") as fh:
-            data = json.load(fh)
-        validate_template(data, source=name)  # 위반 시 아래에서 500 으로 수렴
-        result.append(data)
-    return result
+    try:
+        return load_all_raw(templates_data_dir())
+    except TemplateValidationError as exc:
+        raise HTTPException(status_code=500, detail=f"템플릿 로드 실패: {exc}")
 
 
 def _find_raw_template(template_id: str) -> dict:
@@ -424,3 +418,130 @@ def upload_plan(plan_id: str, body: UploadRequest | None = None):
         }
     finally:
         conn.close()
+
+
+class ScheduleRequest(BaseModel):
+    freq_per_week: int
+
+
+class BrandkitUpdateRequest(BaseModel):
+    business_name: str | None = None
+    category: str | None = None
+    description: str | None = None
+    address: str | None = None
+    phone: str | None = None
+    sns_url: str | None = None
+    primary_color: str | None = None
+    logo_path: str | None = None
+    photos: list[str] | None = None
+
+
+class BrandkitCrawlRequest(BaseModel):
+    url: str
+
+
+@router.get("/schedule")
+def get_schedule():
+    conn = promo_db.connect()
+    try:
+        schedule = scheduler.get_schedule(conn)
+    finally:
+        conn.close()
+    if schedule is None:
+        raise HTTPException(status_code=404, detail="스케줄이 설정되지 않았습니다")
+    return schedule.to_dict()
+
+
+@router.put("/schedule")
+def put_schedule(body: ScheduleRequest):
+    conn = promo_db.connect()
+    try:
+        try:
+            schedule = scheduler.set_frequency(conn, body.freq_per_week)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc))
+    finally:
+        conn.close()
+    return schedule.to_dict()
+
+
+@router.post("/schedule/tick")
+def schedule_tick():
+    """만기 런을 동기 실행한다 (cron 대상 — 렌더 포함 수 분 소요 가능).
+
+    CLI 동등물: `python -m app.promo.scheduler`
+    """
+    return scheduler.tick()
+
+
+@router.get("/brandkit")
+def get_brandkit():
+    conn = promo_db.connect()
+    try:
+        kit = brandkit_store.load(conn)
+    finally:
+        conn.close()
+    if kit is None:
+        raise HTTPException(status_code=404, detail="브랜드킷이 없습니다")
+    return kit.to_dict()
+
+
+@router.put("/brandkit")
+def put_brandkit(body: BrandkitUpdateRequest):
+    """수동 필드를 기존 브랜드킷에 병합한다 (없으면 신규 생성)."""
+    fields = body.model_dump(exclude_none=True)
+    conn = promo_db.connect()
+    try:
+        kit = brandkit_store.load(conn)
+        if kit is None:
+            kit = BrandKit(source="manual")
+        kit = brandkit_store.merge_manual(kit, fields)
+        brandkit_store.save(conn, kit)
+    finally:
+        conn.close()
+    return kit.to_dict()
+
+
+@router.post("/brandkit/crawl")
+def crawl_brandkit(body: BrandkitCrawlRequest):
+    """URL 을 크롤해 비어 있는 브랜드킷 필드만 채운다 (큐레이션 우선).
+
+    og_image 는 원격 URL 이라 소재(photos)로 넣지 않는다 — 소재는 로컬
+    파일 경로만 허용 (compose 보안 경로 규칙).
+    """
+    result = brandkit_crawler.crawl(body.url)
+    if result.status == "failed":
+        raise HTTPException(
+            status_code=502,
+            detail=f"크롤 실패: {'; '.join(result.warnings) or '알 수 없는 오류'}",
+        )
+
+    fields = result.fields
+    conn = promo_db.connect()
+    try:
+        kit = brandkit_store.load(conn) or BrandKit(source="crawl")
+        changes: dict = {}
+        if not kit.business_name and (
+            fields.get("og_title") or fields.get("title")
+        ):
+            changes["business_name"] = fields.get("og_title") or fields["title"]
+        if not kit.description and (
+            fields.get("og_description") or fields.get("description")
+        ):
+            changes["description"] = (
+                fields.get("og_description") or fields["description"]
+            )
+        if not kit.sns_url:
+            changes["sns_url"] = body.url
+        if changes:
+            kit = kit.touched(**changes)
+            brandkit_store.save(conn, kit)
+    finally:
+        conn.close()
+    return {
+        "status": result.status,
+        "crawled_fields": fields,
+        "applied_fields": sorted(changes),
+        "warnings": result.warnings,
+        "brandkit": kit.to_dict(),
+    }

@@ -41,6 +41,26 @@ try:
 finally:
     conn.close()
 
+crawl_col, crawl_btn_col = st.columns([4, 1])
+with crawl_col:
+    crawl_url = st.text_input(
+        "가게 홈페이지/SNS URL 크롤 (선택)",
+        help="OG 메타에서 비어 있는 필드(가게 이름/소개)만 자동으로 채웁니다.",
+    )
+with crawl_btn_col:
+    st.write("")
+    st.write("")
+    if st.button("크롤", disabled=not crawl_url.strip()):
+        try:
+            crawl = promo_api.crawl_brandkit(
+                promo_api.BrandkitCrawlRequest(url=crawl_url.strip())
+            )
+            applied = ", ".join(crawl["applied_fields"]) or "없음 (이미 채워짐)"
+            st.success(f"크롤 {crawl['status']} — 반영 필드: {applied}")
+            st.rerun()
+        except HTTPException as exc:
+            st.error(_detail(exc))
+
 with st.form("brandkit_form"):
     business_name = st.text_input(
         "가게 이름", value=kit.business_name if kit else ""

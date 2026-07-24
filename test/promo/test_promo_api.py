@@ -355,3 +355,118 @@ def test_upload_service_failure_502_not_recorded(client, monkeypatch, tmp_path):
     finally:
         conn.close()
     assert count == 0
+
+
+# ── 스케줄 ───────────────────────────────────────────────────────────
+
+
+def test_schedule_get_404_before_setup(client):
+    assert client.get("/api/v1/promo/schedule").status_code == 404
+
+
+def test_schedule_put_and_get(client):
+    response = client.put("/api/v1/promo/schedule", json={"freq_per_week": 3})
+    assert response.status_code == 200
+    assert len(response.json()["next_runs"]) == 3
+
+    data = client.get("/api/v1/promo/schedule").json()
+    assert data["freq_per_week"] == 3
+
+
+def test_schedule_put_invalid_422(client):
+    assert (
+        client.put("/api/v1/promo/schedule", json={"freq_per_week": 0}).status_code
+        == 422
+    )
+
+
+def test_schedule_tick_runs_due(client, monkeypatch):
+    import json as jsonlib
+
+    from app.promo import scheduler
+
+    client.put("/api/v1/promo/schedule", json={"freq_per_week": 2})
+    # 첫 런을 과거로 되감아 만기 상태로 만든다
+    conn = promo_db.connect()
+    try:
+        schedule = scheduler.get_schedule(conn)
+        runs = list(schedule.next_runs)
+        runs[0] = "2000-01-01T00:00:00+00:00"
+        conn.execute(
+            "UPDATE schedule SET next_runs = ? WHERE id = 1", (jsonlib.dumps(runs),)
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    monkeypatch.setattr(
+        scheduler, "run_autopilot_once", lambda conn: {"plan_id": "auto-1"}
+    )
+    report = client.post("/api/v1/promo/schedule/tick").json()
+    assert report["status"] == "ok"
+    assert len(report["ran"]) == 1
+    assert report["ran"][0]["plan_id"] == "auto-1"
+
+
+# ── 브랜드킷 ─────────────────────────────────────────────────────────
+
+
+def test_brandkit_get_returns_seeded_kit(client):
+    data = client.get("/api/v1/promo/brandkit").json()
+    assert data["business_name"] == "우리가게"
+
+
+def test_brandkit_put_merges_fields(client):
+    response = client.put(
+        "/api/v1/promo/brandkit", json={"category": "카페", "description": "새 소개"}
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["category"] == "카페"
+    assert data["business_name"] == "우리가게"  # 기존 필드 보존
+
+
+def test_brandkit_crawl_fills_empty_fields_only(client, monkeypatch):
+    from app.promo.brandkit.crawler import CrawlResult
+
+    monkeypatch.setattr(
+        promo_api.brandkit_crawler,
+        "crawl",
+        lambda url, **kw: CrawlResult(
+            status="ok",
+            fields={
+                "og_title": "크롤된 상호",
+                "og_description": "크롤된 소개",
+                "og_image": "https://example.com/img.jpg",
+            },
+            warnings=[],
+        ),
+    )
+    response = client.post(
+        "/api/v1/promo/brandkit/crawl", json={"url": "https://example.com"}
+    )
+    assert response.status_code == 200
+    data = response.json()
+    # business_name 은 이미 채워져 있으므로 미반영, description/sns_url 만 반영
+    assert "business_name" not in data["applied_fields"]
+    assert "description" in data["applied_fields"]
+    assert data["brandkit"]["business_name"] == "우리가게"
+    assert data["brandkit"]["description"] == "크롤된 소개"
+    assert data["brandkit"]["sns_url"] == "https://example.com"
+
+
+def test_brandkit_crawl_failure_502(client, monkeypatch):
+    from app.promo.brandkit.crawler import CrawlResult
+
+    monkeypatch.setattr(
+        promo_api.brandkit_crawler,
+        "crawl",
+        lambda url, **kw: CrawlResult(
+            status="failed", fields={}, warnings=["요청 실패: timeout"]
+        ),
+    )
+    response = client.post(
+        "/api/v1/promo/brandkit/crawl", json={"url": "https://example.com"}
+    )
+    assert response.status_code == 502
+    assert "timeout" in response.json()["detail"]
