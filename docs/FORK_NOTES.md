@@ -46,3 +46,18 @@ promo-shorts 는 [MoneyPrinterTurbo](https://github.com/harry0703/MoneyPrinterTu
   `<storage>/config.toml` 을 시드(+SaaS 차단값 주입)하고, 코어는 env
   `MPT_CONFIG_FILE`(위 코어 수정 예외)로 그 경로를 직접 읽고 쓴다.
   과거의 루트 `config.toml` symlink 연결 방식은 제거되었다.
+
+## 외부 코드/도구 채택 결정 (2026-07-24)
+
+- **레포 공개**: `nimej99/jemshorts` 는 PUBLIC 이다 (오너 결정).
+- **OpenMontage (AGPL-3.0) 코드 차용 허용**: 오너가 소스 공개를 전제로 승인.
+  AGPL 코드를 처음 들여오는 커밋에서 **루트 LICENSE 를 AGPL-3.0 으로 교체**하고
+  (MIT upstream 고지는 유지 — MIT→AGPL 결합은 적법), 차용 파일마다 출처
+  (OpenMontage 경로 + 커밋 해시)를 파일 헤더와 이 문서에 등재한다.
+  아직 차용된 코드는 없다 — 현재 LICENSE 는 MIT 그대로.
+- **agent-reach (MIT)**: 제품 임베드 아님. 개발/리서치 도구로 로컬 설치
+  (`uv tool install git+https://github.com/Panniantong/agent-reach`).
+  용도: 경쟁 쇼츠 자막 추출 (`yt-dlp --skip-download --write-auto-subs
+  --sub-langs "ko,en" --js-runtimes node <URL>`), 레퍼런스 리서치.
+- **agency-agents (MIT)**: 개별 페르소나 파일만 참고용으로
+  `~/.claude/agents/` 에 설치 (video-streaming-engineer, prompt-engineer).
