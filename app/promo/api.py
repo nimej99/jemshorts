@@ -26,7 +26,7 @@ from loguru import logger
 from pydantic import BaseModel, Field
 
 from app.promo import db as promo_db
-from app.promo import pipeline, plans
+from app.promo import pipeline, plans, uploads
 from app.promo.brandkit import store as brandkit_store
 from app.promo.research import (
     ResearchToolMissingError,
@@ -107,6 +107,13 @@ class ReferenceRequest(BaseModel):
 class ScriptPromptRequest(BaseModel):
     template_id: str
     reference_url: str | None = None
+
+
+class UploadRequest(BaseModel):
+    platforms: list[str] = Field(default_factory=lambda: ["youtube"])
+    title: str | None = None
+    description: str | None = None
+    privacy_status: str = "public"
 
 
 def _gate_dict(gate) -> dict:
@@ -281,8 +288,12 @@ def research_reference(body: ReferenceRequest):
     }
 
 
-@router.post("/script-prompt")
-def script_prompt(body: ScriptPromptRequest):
+def _resolve_script_prompt(body: ScriptPromptRequest) -> tuple[str, bool]:
+    """템플릿+브랜드킷(+레퍼런스 실측)으로 프롬프트를 만든다.
+
+    반환: (prompt, reference_used). 레퍼런스 URL 이 주어졌는데 실측에
+    실패하면 502 (조용한 강등 금지 — 레퍼런스 없이 진행하려면 URL 을 빼라).
+    """
     raw = _find_raw_template(body.template_id)
     template = validate_template(raw, source=body.template_id)
     kit = _load_brandkit()
@@ -303,9 +314,113 @@ def script_prompt(body: ScriptPromptRequest):
                 detail="레퍼런스 자막을 가져오지 못했습니다 (URL 확인)",
             )
 
-    prompt = build_script_prompt(template, kit, reference)
+    return build_script_prompt(template, kit, reference), reference is not None
+
+
+@router.post("/script-prompt")
+def script_prompt(body: ScriptPromptRequest):
+    prompt, reference_used = _resolve_script_prompt(body)
     return {
         "template_id": body.template_id,
         "prompt": prompt,
-        "reference_used": reference is not None,
+        "reference_used": reference_used,
     }
+
+
+@router.post("/scripts")
+def generate_script(body: ScriptPromptRequest):
+    """프롬프트를 코어 LLM 으로 실행해 스크립트를 생성한다.
+
+    코어 `llm._generate_response` 는 실패를 "Error: ..." 문자열로
+    반환하므로 여기서 502 로 승격한다 (조용한 오류 문자열 전파 금지).
+    """
+    prompt, reference_used = _resolve_script_prompt(body)
+
+    from app.services import llm  # 지연 임포트 (LLM SDK 로드 비용)
+
+    response = llm._generate_response(prompt)
+    script = (response or "").strip()
+    if not script or script.startswith("Error:"):
+        raise HTTPException(
+            status_code=502,
+            detail=f"스크립트 생성 실패: {script or '빈 응답'}",
+        )
+    return {
+        "template_id": body.template_id,
+        "script": script,
+        "reference_used": reference_used,
+    }
+
+
+@router.post("/plans/{plan_id}/upload")
+def upload_plan(plan_id: str, body: UploadRequest | None = None):
+    """렌더 완료된 플랜의 산출물을 업로드한다 (일일 상한 강제).
+
+    업로드는 코어 upload_post(upload-post.com) 서비스를 경유한다.
+    성공 시 videos 테이블에 delivered 로 기록 — 이 기록이 상한의 근거다.
+    """
+    body = body or UploadRequest()
+    conn = promo_db.connect()
+    try:
+        row = plans.get_row(conn, plan_id)
+        if row is None:
+            raise HTTPException(status_code=404, detail=f"플랜이 없습니다: {plan_id}")
+        if row["status"] != plans.STATUS_RENDERED:
+            raise HTTPException(
+                status_code=409,
+                detail=f"렌더 완료 플랜만 업로드할 수 있습니다 (현재: {row['status']})",
+            )
+        result = json.loads(row["result_json"] or "{}")
+        videos = result.get("videos") or []
+        if not videos or not os.path.exists(videos[0]):
+            raise HTTPException(
+                status_code=409, detail="렌더 산출물 파일을 찾을 수 없습니다"
+            )
+        if uploads.cap_reached(conn):
+            raise HTTPException(
+                status_code=429,
+                detail={
+                    "message": "일일 업로드 상한에 도달했습니다",
+                    "uploads_today": uploads.count_delivered_today(conn),
+                    "daily_cap": uploads.daily_cap(),
+                },
+            )
+
+        plan = plans.restore_plan(row)
+        hashtags = [f"#{tag}" for tag in plan.template.hashtags_base]
+        title = body.title or plan.subject
+        description = body.description or f"{plan.subject}\n\n{' '.join(hashtags)}"
+
+        from app.services import upload_post  # 지연 임포트
+
+        upload_result = upload_post.cross_post_video(
+            videos[0],
+            title,
+            platforms=body.platforms,
+            youtube_extra={
+                "youtube_title": title,
+                "youtube_description": description,
+                "tags": [tag.lstrip("#") for tag in hashtags],
+                "privacyStatus": body.privacy_status,
+            },
+        )
+        if not upload_result.get("success"):
+            raise HTTPException(
+                status_code=502,
+                detail=f"업로드 실패: {upload_result.get('error') or upload_result}",
+            )
+
+        video_id = row["task_id"] or f"promo-{plan_id}"
+        uploads.record_delivered(
+            conn, video_id, plan.template.template_id, description, hashtags
+        )
+        return {
+            "plan_id": plan_id,
+            "video_id": video_id,
+            "platforms": body.platforms,
+            "request_id": upload_result.get("request_id"),
+            "uploads_today": uploads.count_delivered_today(conn),
+            "daily_cap": uploads.daily_cap(),
+        }
+    finally:
+        conn.close()

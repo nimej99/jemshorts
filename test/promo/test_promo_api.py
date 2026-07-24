@@ -224,3 +224,134 @@ def test_script_prompt_with_reference(client, monkeypatch):
     data = response.json()
     assert data["reference_used"] is True
     assert "드디어 나왔다" in data["prompt"]
+
+
+def test_generate_script_via_llm(client, monkeypatch):
+    from app.services import llm
+
+    monkeypatch.setattr(
+        llm, "_generate_response", lambda prompt: "생성된 스크립트입니다."
+    )
+    response = client.post(
+        "/api/v1/promo/scripts", json={"template_id": "api-test-v1"}
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["script"] == "생성된 스크립트입니다."
+    assert data["reference_used"] is False
+
+
+def test_generate_script_llm_error_502(client, monkeypatch):
+    from app.services import llm
+
+    monkeypatch.setattr(
+        llm, "_generate_response", lambda prompt: "Error: api_key is not set"
+    )
+    response = client.post(
+        "/api/v1/promo/scripts", json={"template_id": "api-test-v1"}
+    )
+    assert response.status_code == 502
+    assert "api_key" in response.json()["detail"]
+
+
+def _make_rendered_plan(client, tmp_path):
+    """플랜을 생성하고 DB 직접 조작으로 rendered 상태 + 실존 산출물을 만든다."""
+    plan = _create_plan(client)
+    video = tmp_path / f"final-{plan['plan_id']}.mp4"
+    video.write_bytes(b"video-bytes")
+    conn = promo_db.connect()
+    try:
+        plans.mark_rendering(conn, plan["plan_id"], f"task-{plan['plan_id']}")
+        plans.finish(
+            conn,
+            plan["plan_id"],
+            plans.STATUS_RENDERED,
+            {
+                "task_id": f"task-{plan['plan_id']}",
+                "videos": [str(video)],
+                "render_seconds": 1.0,
+                "technical_gate": {"passed": True, "failures": [], "warnings": []},
+                "warnings": [],
+            },
+        )
+    finally:
+        conn.close()
+    return plan
+
+
+def test_upload_success_records_delivery(client, monkeypatch, tmp_path):
+    from app.services import upload_post
+
+    calls = {}
+
+    def fake_cross_post(video_path, title, platforms=None, youtube_extra=None):
+        calls.update(
+            video_path=video_path,
+            title=title,
+            platforms=platforms,
+            youtube_extra=youtube_extra,
+        )
+        return {"success": True, "request_id": "req-1"}
+
+    monkeypatch.setattr(upload_post, "cross_post_video", fake_cross_post)
+
+    plan = _make_rendered_plan(client, tmp_path)
+    response = client.post(f"/api/v1/promo/plans/{plan['plan_id']}/upload", json={})
+    assert response.status_code == 200, response.text
+    data = response.json()
+    assert data["request_id"] == "req-1"
+    assert data["uploads_today"] == 1
+    assert calls["platforms"] == ["youtube"]
+    assert "우리가게" in calls["title"]
+    assert calls["youtube_extra"]["tags"] == ["테스트"]
+
+
+def test_upload_requires_rendered_status(client, tmp_path):
+    plan = _create_plan(client)
+    response = client.post(f"/api/v1/promo/plans/{plan['plan_id']}/upload", json={})
+    assert response.status_code == 409
+
+
+def test_upload_daily_cap_429(client, monkeypatch, tmp_path):
+    from app.config import config
+    from app.services import upload_post
+
+    monkeypatch.setitem(config.app, "promo_upload_daily_cap", 1)
+    monkeypatch.setattr(
+        upload_post,
+        "cross_post_video",
+        lambda *a, **k: {"success": True, "request_id": "req"},
+    )
+
+    first = _make_rendered_plan(client, tmp_path)
+    assert (
+        client.post(f"/api/v1/promo/plans/{first['plan_id']}/upload", json={})
+        .status_code
+        == 200
+    )
+
+    second = _make_rendered_plan(client, tmp_path)
+    response = client.post(f"/api/v1/promo/plans/{second['plan_id']}/upload", json={})
+    assert response.status_code == 429
+    assert response.json()["detail"]["daily_cap"] == 1
+
+
+def test_upload_service_failure_502_not_recorded(client, monkeypatch, tmp_path):
+    from app.services import upload_post
+
+    monkeypatch.setattr(
+        upload_post,
+        "cross_post_video",
+        lambda *a, **k: {"success": False, "error": "Upload-Post not configured"},
+    )
+
+    plan = _make_rendered_plan(client, tmp_path)
+    response = client.post(f"/api/v1/promo/plans/{plan['plan_id']}/upload", json={})
+    assert response.status_code == 502
+
+    conn = promo_db.connect()
+    try:
+        count = conn.execute("SELECT COUNT(*) FROM videos").fetchone()[0]
+    finally:
+        conn.close()
+    assert count == 0
