@@ -47,9 +47,27 @@ CREATE TABLE IF NOT EXISTS brandkit (
 );
 """
 
+# v3 스키마: 렌더 플랜 (plan/render 2단계 승인 게이트의 영속화)
+# payload_json: RenderPlan 복원에 필요한 전체 페이로드 (템플릿 원본 dict 포함
+# — plan 과 render 사이에 템플릿 파일이 바뀌어도 플랜은 불변).
+_V3 = """
+CREATE TABLE IF NOT EXISTS promo_plans (
+    plan_id      TEXT PRIMARY KEY,
+    status       TEXT NOT NULL DEFAULT 'planned'
+                 CHECK (status IN ('planned', 'rendering', 'rendered', 'failed')),
+    template_id  TEXT NOT NULL,
+    payload_json TEXT NOT NULL,
+    task_id      TEXT,
+    result_json  TEXT,
+    created_at   TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at   TEXT NOT NULL DEFAULT (datetime('now'))
+);
+"""
+
 MIGRATIONS: list[str] = [
     _V1,
     _V2,
+    _V3,
 ]
 
 # 최신 스키마 버전 == 마이그레이션 개수 (user_version 목표값)

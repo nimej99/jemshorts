@@ -37,6 +37,7 @@ promo-shorts 는 [MoneyPrinterTurbo](https://github.com/harry0703/MoneyPrinterTu
 | 파일 | 사유 | 내용 / diff 위치 |
 | --- | --- | --- |
 | `app/config/config.py` | config 영속화 (M0 review fixes). symlink 우회 방식은 심볼릭 링크 미지원 파일시스템·컨테이너 재빌드 시 깨지기 쉬워 아키텍트 리뷰에서 반려됨. env 오버라이드가 최소·명시적 해법 | `config_file = os.environ.get("MPT_CONFIG_FILE", f"{root_dir}/config.toml")` 1줄 + `save_config()` 의 임시파일 디렉터리를 `os.path.dirname(config_file)` 로 변경(볼륨 경계에서 `os.replace` 원자성 유지). load/save 모두 같은 `config_file` 경로 사용 (v1-dev, M0 review fixes 커밋) |
+| `app/router.py` | promo API 노출 (M2). promo 라우터(`/api/v1/promo/*`)를 앱에 등재하려면 루트 라우터 include 가 유일한 진입점 — 래핑 우회 불가 | import 1줄 + `root_api_router.include_router(promo_api.router)` 1줄 (v1-dev, M2 커밋). 라우터 구현 전체는 `app/promo/api.py` 에 격리 |
 
 ## 참고: 코어 우회 사례
 

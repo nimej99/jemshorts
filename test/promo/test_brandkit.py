@@ -256,12 +256,14 @@ def _table_names(conn: sqlite3.Connection) -> set[str]:
     return {row[0] for row in rows}
 
 
-def test_store_round_trip_and_v2_migration(db_path):
-    """save/load round-trip + user_version==2 + brandkit 테이블 생성 확인."""
+def test_store_round_trip_and_migration(db_path):
+    """save/load round-trip + 최신 user_version + brandkit 테이블 생성 확인."""
     conn = promo_db.connect(db_path)
     try:
-        assert LATEST_VERSION == 2
-        assert int(conn.execute("PRAGMA user_version").fetchone()[0]) == 2
+        assert LATEST_VERSION >= 2
+        assert (
+            int(conn.execute("PRAGMA user_version").fetchone()[0]) == LATEST_VERSION
+        )
         assert "brandkit" in _table_names(conn)
 
         assert store.exists(conn) is False
@@ -285,8 +287,8 @@ def test_store_round_trip_and_v2_migration(db_path):
         conn.close()
 
 
-def test_v2_migration_preserves_v1_tables_and_data(db_path):
-    """기존 v1 DB 를 v2 로 올려도 v1 테이블/데이터가 보존된다."""
+def test_migration_preserves_v1_tables_and_data(db_path):
+    """기존 v1 DB 를 최신으로 올려도 v1 테이블/데이터가 보존된다."""
     # v1 상태의 DB 를 수동으로 구성
     conn = sqlite3.connect(db_path)
     conn.executescript(MIGRATIONS[0])
@@ -300,7 +302,9 @@ def test_v2_migration_preserves_v1_tables_and_data(db_path):
     # 기동 시 v2 마이그레이션 적용
     conn = promo_db.connect(db_path)
     try:
-        assert int(conn.execute("PRAGMA user_version").fetchone()[0]) == 2
+        assert (
+            int(conn.execute("PRAGMA user_version").fetchone()[0]) == LATEST_VERSION
+        )
         assert {"videos", "schedule", "fallback_log", "brandkit"} <= _table_names(conn)
         row = conn.execute("SELECT status FROM videos WHERE id='v1'").fetchone()
         assert row["status"] == "generating"
