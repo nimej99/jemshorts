@@ -438,17 +438,18 @@ def test_brandkit_put_merges_fields(client):
 
 
 def test_brandkit_crawl_fills_empty_fields_only(client, monkeypatch):
-    from app.promo.brandkit.crawler import CrawlResult
+    from app.promo.brandkit.enrich import EnrichResult
 
     monkeypatch.setattr(
-        promo_api.brandkit_crawler,
-        "crawl",
-        lambda url, **kw: CrawlResult(
+        promo_api.brandkit_enrich,
+        "enrich",
+        lambda url: EnrichResult(
+            site="generic",
             status="ok",
             fields={
-                "og_title": "크롤된 상호",
-                "og_description": "크롤된 소개",
-                "og_image": "https://example.com/img.jpg",
+                "business_name": "크롤된 상호",
+                "description": "크롤된 소개",
+                "sns_url": url,
             },
             warnings=[],
         ),
@@ -461,19 +462,20 @@ def test_brandkit_crawl_fills_empty_fields_only(client, monkeypatch):
     # business_name 은 이미 채워져 있으므로 미반영, description/sns_url 만 반영
     assert "business_name" not in data["applied_fields"]
     assert "description" in data["applied_fields"]
+    assert data["site"] == "generic"
     assert data["brandkit"]["business_name"] == "우리가게"
     assert data["brandkit"]["description"] == "크롤된 소개"
     assert data["brandkit"]["sns_url"] == "https://example.com"
 
 
 def test_brandkit_crawl_failure_502(client, monkeypatch):
-    from app.promo.brandkit.crawler import CrawlResult
+    from app.promo.brandkit.enrich import EnrichResult
 
     monkeypatch.setattr(
-        promo_api.brandkit_crawler,
-        "crawl",
-        lambda url, **kw: CrawlResult(
-            status="failed", fields={}, warnings=["요청 실패: timeout"]
+        promo_api.brandkit_enrich,
+        "enrich",
+        lambda url: EnrichResult(
+            site="generic", status="failed", warnings=["요청 실패: timeout"]
         ),
     )
     response = client.post(
@@ -481,6 +483,53 @@ def test_brandkit_crawl_failure_502(client, monkeypatch):
     )
     assert response.status_code == 502
     assert "timeout" in response.json()["detail"]
+
+
+def test_brandkit_naver_place_url_guides_to_local_api(client):
+    response = client.post(
+        "/api/v1/promo/brandkit/crawl",
+        json={"url": "https://m.place.naver.com/restaurant/123/home"},
+    )
+    assert response.status_code == 502
+    assert "naver-local" in response.json()["detail"]
+
+
+def test_brandkit_naver_local_applies_top_result(client, monkeypatch):
+    monkeypatch.setattr(
+        promo_api.brandkit_enrich,
+        "naver_local_search",
+        lambda query, display=5: [
+            {
+                "business_name": "우리가게",
+                "category": "음식점>분식",
+                "address": "서울 마포구 1-1",
+                "road_address": "서울 마포구 도로명로 1",
+                "phone": "02-123-4567",
+                "link": "https://example.com/shop",
+            }
+        ],
+    )
+    # query 미지정 -> 저장된 상호명("우리가게")으로 검색
+    response = client.post("/api/v1/promo/brandkit/naver-local", json={})
+    assert response.status_code == 200, response.text
+    data = response.json()
+    assert data["query"] == "우리가게"
+    assert "category" in data["applied_fields"]
+    assert data["brandkit"]["address"] == "서울 마포구 도로명로 1"  # 도로명 우선
+    assert data["brandkit"]["phone"] == "02-123-4567"
+
+
+def test_brandkit_naver_local_not_configured_503(client, monkeypatch):
+    from app.promo.brandkit.enrich import NaverApiNotConfiguredError
+
+    def not_configured(query, display=5):
+        raise NaverApiNotConfiguredError("naver_client_id 미설정")
+
+    monkeypatch.setattr(
+        promo_api.brandkit_enrich, "naver_local_search", not_configured
+    )
+    response = client.post("/api/v1/promo/brandkit/naver-local", json={})
+    assert response.status_code == 503
 
 
 # ── 트렌드 ───────────────────────────────────────────────────────────

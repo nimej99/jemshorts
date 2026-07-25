@@ -44,8 +44,9 @@ finally:
 crawl_col, crawl_btn_col = st.columns([4, 1])
 with crawl_col:
     crawl_url = st.text_input(
-        "가게 홈페이지/SNS URL 크롤 (선택)",
-        help="OG 메타에서 비어 있는 필드(가게 이름/소개)만 자동으로 채웁니다.",
+        "가게 홈페이지/인스타그램 URL 수집 (선택)",
+        help="인스타그램 프로필은 Instaloader(오픈소스)로, 일반 URL 은 OG 메타로 "
+        "비어 있는 필드(가게 이름/소개)만 채웁니다. 네이버 정보는 아래 지역검색 사용.",
     )
 with crawl_btn_col:
     st.write("")
@@ -57,6 +58,29 @@ with crawl_btn_col:
             )
             applied = ", ".join(crawl["applied_fields"]) or "없음 (이미 채워짐)"
             st.success(f"크롤 {crawl['status']} — 반영 필드: {applied}")
+            st.rerun()
+        except HTTPException as exc:
+            st.error(_detail(exc))
+
+naver_col, naver_btn_col = st.columns([4, 1])
+with naver_col:
+    naver_query = st.text_input(
+        "네이버 지역검색 (선택)",
+        help="네이버 공식 오픈API 로 상호를 검색해 카테고리/주소/전화를 채웁니다. "
+        "비워두면 저장된 상호명으로 검색. config 에 naver_client_id/secret 필요.",
+    )
+with naver_btn_col:
+    st.write("")
+    st.write("")
+    if st.button("지역검색"):
+        try:
+            found = promo_api.naver_local_brandkit(
+                promo_api.NaverLocalRequest(query=naver_query or None)
+            )
+            applied = ", ".join(found["applied_fields"]) or "없음 (이미 채워짐)"
+            st.success(
+                f"'{found['top']['business_name']}' 적용 — 반영 필드: {applied}"
+            )
             st.rerun()
         except HTTPException as exc:
             st.error(_detail(exc))
