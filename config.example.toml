@@ -273,6 +273,18 @@ upload_post_youtube_privacy_status = "public"
 upload_post_max_pending_tasks = 10
 
 # =============================================================================
+# Promo Shorts (포크 신규 계층)
+# =============================================================================
+
+# 업로드 백엔드: "upload_post"(기본, upload-post.com) | "postiz"(셀프호스트)
+promo_publish_backend = "upload_post"
+# Postiz 셀프호스트 (AGPL — 별도 서비스 HTTP 호출, 코드 결합 없음)
+# 예: http://localhost:4007/public/v1, 키는 Settings > Developers
+postiz_api_url = ""
+postiz_api_key = ""
+postiz_youtube_integration_id = ""
+
+# =============================================================================
 # Whisper Subtitles / Whisper 字幕
 # =============================================================================
 

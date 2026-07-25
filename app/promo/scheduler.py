@@ -233,18 +233,15 @@ def run_autopilot_once(conn: sqlite3.Connection) -> dict:
 
     hashtags = [f"#{tag}" for tag in template.hashtags_base]
     description = f"{plan.subject}\n\n{' '.join(hashtags)}"
-    from app.services import upload_post  # 지연 임포트
+    from app.promo import publish  # 지연 임포트
 
-    upload_result = upload_post.cross_post_video(
+    upload_result = publish.publish_video(
         result.videos[0],
         plan.subject,
+        description,
+        [tag.lstrip("#") for tag in hashtags],
+        privacy_status="public",
         platforms=["youtube"],
-        youtube_extra={
-            "youtube_title": plan.subject,
-            "youtube_description": description,
-            "tags": [tag.lstrip("#") for tag in hashtags],
-            "privacyStatus": "public",
-        },
     )
     if not upload_result.get("success"):
         raise SchedulerError(
