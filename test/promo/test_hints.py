@@ -73,3 +73,15 @@ def test_prompt_with_reference_uses_measured_pacing(template, kit):
     assert "드디어 나왔다" in prompt
     assert "레퍼런스 실측" in prompt
     assert "베끼지 마세요" in prompt
+
+
+def test_prompt_with_trend_keywords(template, kit):
+    prompt = build_script_prompt(template, kit, trend_keywords=["동네 맛집", "폭염"])
+
+    assert "[트렌드]" in prompt
+    assert "동네 맛집, 폭염" in prompt
+    assert "관련 없으면 무시하세요" in prompt
+
+
+def test_prompt_without_trend_keywords_has_no_trend_block(template, kit):
+    assert "[트렌드]" not in build_script_prompt(template, kit)

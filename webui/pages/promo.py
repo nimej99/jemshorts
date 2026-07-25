@@ -111,6 +111,30 @@ st.header("3. 스크립트")
 reference_url = st.text_input(
     "레퍼런스 쇼츠 URL (선택)", help="참고 영상 페이싱/훅을 실측해 프롬프트에 반영"
 )
+
+trends_data = promo_api.get_trends()
+trend_keywords = [item["keyword"] for item in trends_data["items"]]
+trend_col, trend_btn_col = st.columns([4, 1])
+with trend_col:
+    if trend_keywords:
+        stale_mark = " (오래됨 — 갱신 권장)" if trends_data["stale"] else ""
+        st.caption(f"급상승 검색어{stale_mark}: " + ", ".join(trend_keywords[:8]))
+    else:
+        st.caption("급상승 검색어 캐시 없음 — 갱신을 눌러 수집하세요.")
+with trend_btn_col:
+    if st.button("트렌드 갱신"):
+        try:
+            refreshed = promo_api.refresh_trends()
+            st.success(f"{refreshed['count']}건 수집")
+            st.rerun()
+        except HTTPException as exc:
+            st.error(_detail(exc))
+use_trends = st.checkbox(
+    "스크립트에 트렌드 반영",
+    value=False,
+    disabled=not trend_keywords,
+    help="급상승 키워드를 프롬프트에 참고로 포함합니다 (억지 반영은 프롬프트가 차단).",
+)
 col_gen, col_prompt = st.columns(2)
 with col_gen:
     if st.button("LLM 으로 스크립트 생성"):
@@ -120,6 +144,7 @@ with col_gen:
                     promo_api.ScriptPromptRequest(
                         template_id=template_id,
                         reference_url=reference_url or None,
+                        use_trends=use_trends,
                     )
                 )
             st.session_state["promo_script"] = result["script"]
@@ -130,7 +155,9 @@ with col_prompt:
         try:
             result = promo_api.script_prompt(
                 promo_api.ScriptPromptRequest(
-                    template_id=template_id, reference_url=reference_url or None
+                    template_id=template_id,
+                    reference_url=reference_url or None,
+                    use_trends=use_trends,
                 )
             )
             st.code(result["prompt"])

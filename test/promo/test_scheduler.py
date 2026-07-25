@@ -28,6 +28,20 @@ TEMPLATE_DATA = {
 }
 
 
+@pytest.fixture(autouse=True)
+def _offline_trends(monkeypatch):
+    """tick 의 트렌드 피기백이 네트워크로 나가지 않게 고정한다."""
+    from app.promo import trends
+
+    monkeypatch.setattr(
+        trends,
+        "fetch_google_trends",
+        lambda timeout=0: [
+            trends.TrendItem(keyword="테스트트렌드", traffic_value=100)
+        ],
+    )
+
+
 @pytest.fixture()
 def conn(tmp_path):
     connection = promo_db.connect(tmp_path / "sched-test.db")

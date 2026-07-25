@@ -54,6 +54,17 @@ def client(tmp_path, monkeypatch):
         promo_api.utils, "storage_dir", lambda sub="", create=False: str(local_dir)
     )
 
+    # 트렌드 폴링 오프라인 고정 (tick 피기백/갱신 엔드포인트용)
+    from app.promo import trends
+
+    monkeypatch.setattr(
+        trends,
+        "fetch_google_trends",
+        lambda timeout=0: [
+            trends.TrendItem(keyword="급상승키워드", traffic="500+", traffic_value=500)
+        ],
+    )
+
     # 브랜드킷 시드
     brand_clip = tmp_path / "brand.mp4"
     brand_clip.write_bytes(b"dummy")
@@ -470,3 +481,53 @@ def test_brandkit_crawl_failure_502(client, monkeypatch):
     )
     assert response.status_code == 502
     assert "timeout" in response.json()["detail"]
+
+
+# ── 트렌드 ───────────────────────────────────────────────────────────
+
+
+def test_trends_get_empty_cache(client):
+    data = client.get("/api/v1/promo/research/trends").json()
+    assert data["fetched_at"] is None
+    assert data["stale"] is True
+    assert data["items"] == []
+
+
+def test_trends_refresh_and_get(client):
+    refreshed = client.post("/api/v1/promo/research/trends/refresh").json()
+    assert refreshed["count"] == 1
+    assert refreshed["items"][0]["keyword"] == "급상승키워드"
+
+    data = client.get("/api/v1/promo/research/trends").json()
+    assert data["stale"] is False
+    assert data["items"][0]["traffic"] == "500+"
+
+
+def test_trends_refresh_failure_502(client, monkeypatch):
+    from app.promo import trends
+
+    def broken():
+        raise trends.TrendsFetchError("수집 불가")
+
+    monkeypatch.setattr(trends, "fetch_google_trends", broken)
+    response = client.post("/api/v1/promo/research/trends/refresh")
+    assert response.status_code == 502
+
+
+def test_script_prompt_use_trends(client):
+    client.post("/api/v1/promo/research/trends/refresh")
+
+    data = client.post(
+        "/api/v1/promo/script-prompt",
+        json={"template_id": "api-test-v1", "use_trends": True},
+    ).json()
+    assert data["trend_keywords"] == ["급상승키워드"]
+    assert "급상승키워드" in data["prompt"]
+    assert "[트렌드]" in data["prompt"]
+
+    # use_trends 미지정이면 프롬프트에 트렌드 블록 없음
+    plain = client.post(
+        "/api/v1/promo/script-prompt", json={"template_id": "api-test-v1"}
+    ).json()
+    assert plain["trend_keywords"] == []
+    assert "[트렌드]" not in plain["prompt"]

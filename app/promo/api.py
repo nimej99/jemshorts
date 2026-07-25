@@ -26,7 +26,7 @@ from loguru import logger
 from pydantic import BaseModel, Field
 
 from app.promo import db as promo_db
-from app.promo import pipeline, plans, scheduler, uploads
+from app.promo import pipeline, plans, scheduler, trends, uploads
 from app.promo.brandkit import crawler as brandkit_crawler
 from app.promo.brandkit import store as brandkit_store
 from app.promo.brandkit.models import BrandKit
@@ -101,6 +101,7 @@ class ReferenceRequest(BaseModel):
 class ScriptPromptRequest(BaseModel):
     template_id: str
     reference_url: str | None = None
+    use_trends: bool = False
 
 
 class UploadRequest(BaseModel):
@@ -282,8 +283,10 @@ def research_reference(body: ReferenceRequest):
     }
 
 
-def _resolve_script_prompt(body: ScriptPromptRequest) -> tuple[str, bool]:
-    """템플릿+브랜드킷(+레퍼런스 실측)으로 프롬프트를 만든다.
+def _resolve_script_prompt(
+    body: ScriptPromptRequest,
+) -> tuple[str, bool, list[str]]:
+    """템플릿+브랜드킷(+레퍼런스 실측+트렌드)으로 프롬프트를 만든다.
 
     반환: (prompt, reference_used). 레퍼런스 URL 이 주어졌는데 실측에
     실패하면 502 (조용한 강등 금지 — 레퍼런스 없이 진행하려면 URL 을 빼라).
@@ -308,16 +311,28 @@ def _resolve_script_prompt(body: ScriptPromptRequest) -> tuple[str, bool]:
                 detail="레퍼런스 자막을 가져오지 못했습니다 (URL 확인)",
             )
 
-    return build_script_prompt(template, kit, reference), reference is not None
+    trend_keywords: list[str] = []
+    if body.use_trends:
+        conn = promo_db.connect()
+        try:
+            trend_keywords = trends.latest_keywords(conn)
+        finally:
+            conn.close()
+
+    prompt = build_script_prompt(
+        template, kit, reference, trend_keywords=trend_keywords or None
+    )
+    return prompt, reference is not None, trend_keywords
 
 
 @router.post("/script-prompt")
 def script_prompt(body: ScriptPromptRequest):
-    prompt, reference_used = _resolve_script_prompt(body)
+    prompt, reference_used, trend_keywords = _resolve_script_prompt(body)
     return {
         "template_id": body.template_id,
         "prompt": prompt,
         "reference_used": reference_used,
+        "trend_keywords": trend_keywords,
     }
 
 
@@ -328,7 +343,7 @@ def generate_script(body: ScriptPromptRequest):
     코어 `llm._generate_response` 는 실패를 "Error: ..." 문자열로
     반환하므로 여기서 502 로 승격한다 (조용한 오류 문자열 전파 금지).
     """
-    prompt, reference_used = _resolve_script_prompt(body)
+    prompt, reference_used, trend_keywords = _resolve_script_prompt(body)
 
     from app.services import llm  # 지연 임포트 (LLM SDK 로드 비용)
 
@@ -343,6 +358,7 @@ def generate_script(body: ScriptPromptRequest):
         "template_id": body.template_id,
         "script": script,
         "reference_used": reference_used,
+        "trend_keywords": trend_keywords,
     }
 
 
@@ -544,4 +560,46 @@ def crawl_brandkit(body: BrandkitCrawlRequest):
         "applied_fields": sorted(changes),
         "warnings": result.warnings,
         "brandkit": kit.to_dict(),
+    }
+
+
+def _trend_item_dict(item: trends.TrendItem) -> dict:
+    return {
+        "keyword": item.keyword,
+        "traffic": item.traffic,
+        "news_title": item.news_title,
+    }
+
+
+@router.get("/research/trends")
+def get_trends():
+    conn = promo_db.connect()
+    try:
+        fetched_at, items = trends.latest(conn)
+        stale = trends.is_stale(conn)
+    finally:
+        conn.close()
+    return {
+        "fetched_at": fetched_at,
+        "stale": stale,
+        "items": [_trend_item_dict(item) for item in items],
+    }
+
+
+@router.post("/research/trends/refresh")
+def refresh_trends():
+    """트렌드를 강제 갱신한다 (수집 실패 시 502 — 기존 캐시는 유지)."""
+    conn = promo_db.connect()
+    try:
+        try:
+            outcome = trends.refresh(conn)
+        except trends.TrendsFetchError as exc:
+            raise HTTPException(status_code=502, detail=f"트렌드 수집 실패: {exc}")
+        fetched_at, items = trends.latest(conn)
+    finally:
+        conn.close()
+    return {
+        "fetched_at": fetched_at,
+        "count": outcome["count"],
+        "items": [_trend_item_dict(item) for item in items],
     }

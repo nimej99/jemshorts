@@ -27,7 +27,7 @@ from typing import Callable
 from loguru import logger
 
 from app.promo import db as promo_db
-from app.promo import pipeline, plans, uploads
+from app.promo import pipeline, plans, trends, uploads
 from app.promo.brandkit import store as brandkit_store
 from app.promo.research import build_script_prompt
 from app.promo.templates.schema import load_all_raw, validate_template
@@ -190,7 +190,8 @@ def run_autopilot_once(conn: sqlite3.Connection) -> dict:
     raw = raws[delivered_total % len(raws)]  # 누적 업로드 수 기준 로테이션
     template = validate_template(raw, source=raw["template_id"])
 
-    prompt = build_script_prompt(template, kit)
+    trend_keywords = trends.latest_keywords(conn)
+    prompt = build_script_prompt(template, kit, trend_keywords=trend_keywords or None)
     from app.services import llm  # 지연 임포트
 
     response = llm._generate_response(prompt)
@@ -275,9 +276,19 @@ def tick(
         if runner is None:
             runner = run_autopilot_once
 
+        # 트렌드 폴링 피기백 — tick 이 cron 하트비트이므로 스케줄 유무와
+        # 무관하게 stale 갱신을 시도한다 (실패는 삼킴 — 부가 정보).
+        trends_status = trends.maybe_refresh(conn, now=now)
+
         schedule = get_schedule(conn)
         if schedule is None:
-            return {"status": "no-schedule", "ran": [], "missed": [], "skipped": []}
+            return {
+                "status": "no-schedule",
+                "ran": [],
+                "missed": [],
+                "skipped": [],
+                "trends": trends_status,
+            }
 
         due = due_runs(schedule, now)
         ran: list[dict] = []
@@ -311,6 +322,7 @@ def tick(
             "missed": missed,
             "skipped": skipped,
             "next_runs": updated.next_runs,
+            "trends": trends_status,
         }
     finally:
         if own_conn:

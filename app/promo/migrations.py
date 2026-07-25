@@ -64,10 +64,26 @@ CREATE TABLE IF NOT EXISTS promo_plans (
 );
 """
 
+# v4 스키마: 트렌드 캐시 (Google Trends RSS 폴링 결과, 배치 = fetched_at 동일값)
+_V4 = """
+CREATE TABLE IF NOT EXISTS trends (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    source        TEXT NOT NULL,
+    keyword       TEXT NOT NULL,
+    traffic       TEXT,
+    traffic_value INTEGER NOT NULL DEFAULT 0,
+    news_title    TEXT,
+    fetched_at    TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_trends_fetched_at ON trends(fetched_at);
+"""
+
 MIGRATIONS: list[str] = [
     _V1,
     _V2,
     _V3,
+    _V4,
 ]
 
 # 최신 스키마 버전 == 마이그레이션 개수 (user_version 목표값)
