@@ -200,3 +200,92 @@ def test_naver_local_search_rejects_empty_query(monkeypatch):
 
     with pytest.raises(enrich.NaverApiError, match="비어"):
         enrich.naver_local_search("  ")
+
+
+# ── Scrapling 보조 수집 (네이버 플레이스, 기본 비활성) ───────────────
+
+APOLLO_HTML = """<html><head><script>
+window.__APOLLO_STATE__ = {"ROOT_QUERY":{},"PlaceDetailBase:123":{
+"name":"우리동네 분식","category":"분식","roadAddress":"서울 마포구 도로명로 1",
+"virtualPhone":"050-1234-5678","microReview":["떡볶이 맛집"]}};
+</script></head><body></body></html>"""
+
+
+@pytest.mark.parametrize(
+    ("url", "place_id"),
+    [
+        ("https://m.place.naver.com/restaurant/13153842/home", "13153842"),
+        ("https://m.place.naver.com/place/123/home", "123"),
+        ("https://map.naver.com/p/entry/place/456", "456"),
+        ("https://naver.me/abc123", None),  # 단축링크는 id 없음
+        ("https://m.place.naver.com/", None),
+    ],
+)
+def test_naver_place_id(url, place_id):
+    assert enrich.naver_place_id(url) == place_id
+
+
+def test_parse_naver_place_html_extracts_fields():
+    fields = enrich.parse_naver_place_html(APOLLO_HTML)
+
+    assert fields == {
+        "business_name": "우리동네 분식",
+        "category": "분식",
+        "address": "서울 마포구 도로명로 1",
+        "phone": "050-1234-5678",
+        "description": "떡볶이 맛집",
+    }
+
+
+def test_parse_naver_place_html_empty_cases():
+    assert enrich.parse_naver_place_html("<html></html>") == {}
+    assert (
+        enrich.parse_naver_place_html(
+            "<script>window.__APOLLO_STATE__ = {broken</script>"
+        )
+        == {}
+    )
+    # PlaceDetailBase 없는 Apollo (모바일 페이지 실측 케이스)
+    assert (
+        enrich.parse_naver_place_html(
+            '<script>window.__APOLLO_STATE__ = {"ROOT_QUERY":{}};</script>'
+        )
+        == {}
+    )
+
+
+def test_naver_place_disabled_by_default(monkeypatch):
+    monkeypatch.delitem(config.app, "promo_scrapling_enabled", raising=False)
+    result = enrich.enrich("https://m.place.naver.com/restaurant/123/home")
+
+    assert result.status == "failed"
+    assert any("promo_scrapling_enabled" in w for w in result.warnings)
+
+
+def test_naver_place_enabled_fetches_pcmap(monkeypatch):
+    monkeypatch.setitem(config.app, "promo_scrapling_enabled", True)
+    fetched = {}
+
+    def fake_fetch(url):
+        fetched["url"] = url
+        return APOLLO_HTML
+
+    monkeypatch.setattr(enrich, "_fetch_rendered_html", fake_fetch)
+    result = enrich.enrich("https://m.place.naver.com/restaurant/13153842/home")
+
+    assert fetched["url"] == "https://pcmap.place.naver.com/place/13153842/home"
+    assert result.status == "ok"
+    assert result.fields["business_name"] == "우리동네 분식"
+
+
+def test_naver_place_enabled_without_scrapling_fails_clearly(monkeypatch):
+    monkeypatch.setitem(config.app, "promo_scrapling_enabled", True)
+
+    def fake_fetch(url):
+        raise RuntimeError("Scrapling 미설치: `uv pip install scrapling ...`")
+
+    monkeypatch.setattr(enrich, "_fetch_rendered_html", fake_fetch)
+    result = enrich.enrich("https://m.place.naver.com/restaurant/123/home")
+
+    assert result.status == "failed"
+    assert any("Scrapling 미설치" in w for w in result.warnings)
