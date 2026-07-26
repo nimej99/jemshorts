@@ -31,7 +31,10 @@ TEMPLATE_DATA = {
 }
 
 
-def _fake_retime(materials, narration, storage_local_dir, *, shots=None, retime_id=None):
+def _fake_retime(
+    materials, narration, storage_local_dir, *, shots=None, headlines=None,
+    font_path=None, retime_id=None,
+):
     """ffmpeg 없이 리타이밍 산출물 모양만 흉내낸다 (실제 검증은 test_retime.py)."""
     return [
         RetimedClip(

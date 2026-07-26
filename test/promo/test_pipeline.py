@@ -198,7 +198,10 @@ def _measure_sequence(*seconds):
     return _measure
 
 
-def _fake_retime(materials, narration, storage_local_dir, *, shots=None, retime_id=None):
+def _fake_retime(
+    materials, narration, storage_local_dir, *, shots=None, headlines=None,
+    font_path=None, retime_id=None,
+):
     """ffmpeg 없이 리타이밍 결과 모양만 흉내낸다 (실제 리타이밍은 test_retime.py)."""
     assert len(materials) == len(narration.sections)
     clips = []
@@ -376,3 +379,19 @@ def test_section_shots_expand_into_multiple_clips(env):
     assert plan.clip_seconds == (1.5, 1.5, 8.0, 4.0)
     assert plan.narration.total_s == 15.0  # 타임라인 총 길이는 그대로
     assert plan.clip_duration_s == 8
+
+
+def test_headline_texts_fill_brand_context_and_respect_show_flag():
+    """헤드라인은 브랜드 정보로 채우고, show=false 섹션은 배너를 만들지 않는다."""
+    from app.promo.pipeline import headline_texts
+
+    data = dict(NARRATION_TEMPLATE_DATA, template_id="pipeline-headline-v2")
+    data["structure"] = [dict(s) for s in NARRATION_TEMPLATE_DATA["structure"]]
+    data["structure"][0]["headline"] = {"template": "{shop_name} {menu_name} 출시!"}
+    data["structure"][1]["headline"] = {"template": "숨김", "show": False}
+    kit = BrandKit(business_name="우리분식", category="음식점")
+
+    texts = headline_texts(validate_template(data), kit)
+
+    # 못 채운 {menu_name} 은 원문이 남아 승인 화면에서 누락이 보인다.
+    assert texts == ["우리분식 {menu_name} 출시!", None, None]
