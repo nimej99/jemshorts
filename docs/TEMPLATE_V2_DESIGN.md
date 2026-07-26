@@ -222,7 +222,17 @@ fps/width 커스텀(코어 고정 1080x1920), narration_refs 간접 참조(우�
     원문을 남긴다 — 빈칸으로 지우면 운영자가 누락을 못 본다.
   - 긴 문구는 글자 단위로 최대 2줄까지 감싸고 말줄임을 남긴다(한국어는 공백이 적어
     단어 단위 래핑이 안 맞는다).
-- (e) style_preset → 소재 생성 프롬프트 (ComfyUI/외부 API 연동 시)
+- **(e) 완료** — style_preset → 소재 생성 프롬프트.
+  - `app/promo/templates/style_presets.py`: 프리셋 5종(clean-product / warm-food /
+    bright-lifestyle / night-neon / calm-space) 닫힌 어휘. **스키마가 검증**하므로
+    오타가 소재 생성 단계까지 흘러가지 않는다.
+  - `app/promo/research/material_prompts.py`: vox `keyframe_prompt` 와 동형 —
+    고정 스타일 프리픽스 + `SCENE:` 슬롯(가게/섹션 가이드/feel/샷 지시).
+    샷 kind·crop·motion 은 생성 도구가 알아듣는 영어 카메라 표현으로 옮긴다.
+  - `POST /api/v1/promo/material-prompts` 로 컷별 프롬프트 + 네거티브를 반환한다
+    (브랜드 소재가 모자랄 때 ComfyUI 등에 그대로 붙여넣는 용도).
+  - style_preset 없는 템플릿은 400 — 스타일 없이 생성하면 컷마다 톤이 어긋나므로
+    기본값으로 얼버무리지 않는다.
 
 ## 7. 오픈소스 채택 결정과의 관계
 

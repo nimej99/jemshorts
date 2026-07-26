@@ -31,8 +31,10 @@ from app.promo.brandkit import enrich as brandkit_enrich
 from app.promo.brandkit import store as brandkit_store
 from app.promo.brandkit.models import BrandKit
 from app.promo.research import (
+    MaterialPromptError,
     ResearchToolMissingError,
     analyze_reference,
+    build_material_prompts,
     build_script_prompt,
     fetch_subtitles,
     parse_vtt,
@@ -323,6 +325,43 @@ def _resolve_script_prompt(
         template, kit, reference, trend_keywords=trend_keywords or None
     )
     return prompt, reference is not None, trend_keywords
+
+
+class MaterialPromptRequest(BaseModel):
+    template_id: str
+
+
+@router.post("/material-prompts")
+def material_prompts(body: MaterialPromptRequest):
+    """템플릿 style_preset + 섹션/샷 지시로 컷별 소재 생성 프롬프트를 만든다.
+
+    브랜드 소재가 모자랄 때 외부 생성 도구(ComfyUI 등)에 그대로 붙여넣는 용도다.
+    style_preset 이 없는 템플릿은 400 — 스타일 없이 생성하면 컷마다 톤이 어긋난다.
+    """
+    raw = _find_raw_template(body.template_id)
+    template = validate_template(raw, source=body.template_id)
+    kit = _load_brandkit()
+
+    try:
+        prompts = build_material_prompts(template, kit)
+    except MaterialPromptError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    return {
+        "template_id": template.template_id,
+        "style_preset": template.style_preset,
+        "prompts": [
+            {
+                "section_index": item.section_index,
+                "shot_index": item.shot_index,
+                "role": item.role,
+                "kind": item.kind,
+                "prompt": item.prompt,
+                "negative_prompt": item.negative_prompt,
+            }
+            for item in prompts
+        ],
+    }
 
 
 @router.post("/script-prompt")
