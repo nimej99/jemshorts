@@ -7,6 +7,7 @@ execute_render 의 배선(주입된 러너/상태 사용, 미완료/무산출 �
 
 import shutil
 import subprocess
+from pathlib import Path
 
 import pytest
 
@@ -395,3 +396,153 @@ def test_headline_texts_fill_brand_context_and_respect_show_flag():
 
     # 못 채운 {menu_name} 은 원문이 남아 승인 화면에서 누락이 보인다.
     assert texts == ["우리분식 {menu_name} 출시!", None, None]
+
+
+# --- 실측 오디오 재사용 (b-3) -------------------------------------------------
+
+
+class _FakeCue:
+    def __init__(self, start, end, text):
+        from datetime import timedelta
+
+        self.start = timedelta(seconds=start)
+        self.end = timedelta(seconds=end)
+        self.text = text
+
+
+class _FakeSubMaker:
+    def __init__(self, cues):
+        self.cues = cues
+
+
+def _narration_env(tmp_path, monkeypatch):
+    """plan_render 기본 경로(전체 스크립트 1회 TTS)를 가짜 합성으로 돌린다."""
+    from app.promo import pipeline as pipeline_module
+
+    narration_dir = tmp_path / "narration"
+    monkeypatch.setattr(
+        pipeline_module, "narration_audio_dir", lambda: str(narration_dir)
+    )
+
+    calls = []
+
+    def fake_synthesize(*, text, voice_name, voice_rate, voice_file):
+        from app.promo.timing import split_sentences
+
+        calls.append(voice_file)
+        Path(voice_file).write_bytes(b"fake-audio")
+        sentences = split_sentences(text)
+        spans = [(0.0, 3.0), (3.0, 11.0), (11.0, 15.0)][: len(sentences)]
+        return _FakeSubMaker(
+            [_FakeCue(s, e, t) for (s, e), t in zip(spans, sentences)]
+        )
+
+    monkeypatch.setattr(
+        pipeline_module, "narrate_full_script", _wrap_narrate(fake_synthesize)
+    )
+    return calls
+
+
+def _wrap_narrate(fake_synthesize):
+    from app.promo import timing as timing_module
+
+    def _narrate(script, template, *, voice_name, voice_rate=1.0, audio_dir):
+        return timing_module.narrate_full_script(
+            script,
+            template,
+            voice_name=voice_name,
+            voice_rate=voice_rate,
+            audio_dir=audio_dir,
+            synthesize=fake_synthesize,
+        )
+
+    return _narrate
+
+
+def test_plan_synthesizes_full_script_once_and_keeps_audio(tmp_path, monkeypatch, env):
+    """기본 경로는 전체 스크립트를 1회 합성하고 그 오디오를 플랜에 들고 있는다."""
+    kit, stock_paths, local_dir = env
+    calls = _narration_env(tmp_path, monkeypatch)
+
+    plan = plan_render(
+        validate_template(NARRATION_TEMPLATE_DATA),
+        kit,
+        stock_paths,
+        NARRATION_SCRIPT,
+        local_dir,
+        retime=_fake_retime,
+    )
+
+    assert len(calls) == 1  # 섹션 수만큼 TTS 하지 않는다
+    assert plan.narration.total_s == 15.0
+    assert plan.narration_audio is not None
+    assert Path(plan.narration_audio.audio_file).is_file()
+
+
+def test_execute_render_reuses_measured_audio(tmp_path, monkeypatch, env):
+    """렌더는 실측 오디오를 voice_preview 로 넘겨 TTS 재합성을 건너뛴다."""
+    kit, stock_paths, local_dir = env
+    _narration_env(tmp_path, monkeypatch)
+    task_root = tmp_path / "tasks"
+    monkeypatch.setattr(
+        "app.utils.utils.task_dir",
+        lambda sub="": str((task_root / sub) if sub else task_root),
+    )
+    (task_root / "promo-test").mkdir(parents=True)
+
+    plan = plan_render(
+        validate_template(NARRATION_TEMPLATE_DATA),
+        kit,
+        stock_paths,
+        NARRATION_SCRIPT,
+        local_dir,
+        retime=_fake_retime,
+    )
+    fake_video = tmp_path / "final-1.mp4"
+    fake_video.write_bytes(b"not-a-real-video")
+    seen = {}
+
+    def runner(task_id, params, stop_at, voice_preview=None):
+        seen["preview"] = voice_preview
+        seen["params"] = params
+        return {"videos": [str(fake_video)]}
+
+    execute_render(
+        plan,
+        task_id="promo-test",
+        task_runner=runner,
+        state_getter=lambda tid: {"state": const.TASK_STATE_COMPLETE},
+    )
+
+    preview = seen["preview"]
+    assert preview is not None
+    # 코어 재사용 조건: 문안/음성 파라미터 일치 + 오디오가 task_dir 안 + sub_maker 동반
+    assert preview["script"] == seen["params"].video_script.strip()
+    assert preview["voice_name"] == seen["params"].voice_name
+    assert preview["voice_rate"] == seen["params"].voice_rate
+    assert preview["voice_volume"] == seen["params"].voice_volume
+    assert preview["duration"] == plan.narration.total_s
+    assert preview["sub_maker"] is plan.narration_audio.sub_maker
+    assert Path(preview["audio_file"]).parent == task_root / "promo-test"
+    assert Path(preview["audio_file"]).is_file()
+
+
+def test_execute_render_without_measured_audio_keeps_core_tts(template, env, tmp_path):
+    """실측 오디오가 없는 플랜은 예전처럼 코어가 TTS 한다 (voice_preview 없음)."""
+    plan = _make_plan(template, env)
+    fake_video = tmp_path / "final-1.mp4"
+    fake_video.write_bytes(b"x")
+    seen = {}
+
+    def runner(task_id, params, stop_at):
+        seen["called"] = True
+        return {"videos": [str(fake_video)]}
+
+    execute_render(
+        plan,
+        task_id="promo-plain",
+        task_runner=runner,
+        state_getter=lambda tid: {"state": const.TASK_STATE_COMPLETE},
+    )
+
+    assert seen["called"] is True  # voice_preview 키워드 없이 호출된다

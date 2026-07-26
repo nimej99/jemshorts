@@ -4,9 +4,11 @@ docs/TEMPLATE_V2_DESIGN.md §6 (b) 의 앞단: 스크립트를 섹션별 문장�
 문장 낭독 길이를 **실측**해서 섹션 경계를 다시 계산한다. 템플릿의
 `duration_s` 는 목표값이고, owner=narration 이면 실측이 타임라인의 주인이다.
 
-실측 함수는 주입 가능하다 (`MeasureFn`). 기본 구현은 MPT 코어 TTS 를 그대로
-쓰되(`tts_measurer`), 코어 임포트는 지연 로딩해 단위 테스트가 moviepy/edge-tts
-의존을 끌어오지 않게 한다.
+기본 경로는 `narrate_full_script` — 전체 스크립트를 한 번만 합성하고 자막
+큐로 섹션 경계를 끊는다 (TTS 호출 1회, 실측 합계 = 실제 렌더 오디오 길이,
+그 오디오를 렌더에 그대로 재사용). 섹션별로 따로 재는 `measure_narration` 은
+실측 함수(`MeasureFn`)를 주입하는 경로로 남는다. 코어 임포트는 전부 지연
+로딩이라 단위 테스트가 moviepy/edge-tts 스택을 끌어오지 않는다.
 
 경계는 0 에서 누적으로 계산하므로 섹션 간 공백/겹침이 구조적으로 발생하지
 않는다 (Orkas 의 SCENE_GAP/SCENE_OVERLAP 검사가 우리 구조에서는 불필요).
@@ -16,11 +18,10 @@ docs/TEMPLATE_V2_DESIGN.md §6 (b) 의 앞단: 스크립트를 섹션별 문장�
 
 from __future__ import annotations
 
-import os
 import re
-import tempfile
 import uuid
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Callable, Sequence
 
 from app.promo.templates.schema import Template
@@ -69,6 +70,157 @@ class NarrationTiming:
     @property
     def boundaries(self) -> tuple[tuple[float, float], ...]:
         return tuple((section.start_s, section.end_s) for section in self.sections)
+
+
+@dataclass(frozen=True)
+class NarrationAudio:
+    """전체 스크립트 1회 TTS 산출물 (렌더 때 재사용하기 위한 핸들).
+
+    `sub_maker` 는 직렬화하지 않는다 — 같은 프로세스 안에서 plan -> render 가
+    이어질 때만 재사용된다 (교차 요청 흐름에서는 코어가 평소대로 TTS 한다).
+    """
+
+    audio_file: str
+    duration_s: float
+    sub_maker: object
+    voice_name: str
+    voice_rate: float
+
+
+def cues_from_sub_maker(sub_maker: object) -> list[tuple[float, float, str]]:
+    """sub_maker 에서 (시작초, 끝초, 텍스트) 목록을 뽑는다.
+
+    edge-tts 7.x 의 `cues` 구조를 우선 쓰고, 코어의 다른 TTS 가 채우는 구형
+    `offset/subs` 구조도 읽는다 (app/services/voice.py 와 같은 판별 기준).
+    """
+    cues = getattr(sub_maker, "cues", None)
+    if cues:
+        return [
+            (cue.start.total_seconds(), cue.end.total_seconds(), str(cue.text))
+            for cue in cues
+        ]
+    offsets = getattr(sub_maker, "offset", None) or []
+    subs = getattr(sub_maker, "subs", None) or []
+    return [
+        (start / 1e7, end / 1e7, str(text)) for (start, end), text in zip(offsets, subs)
+    ]
+
+
+def sections_from_cues(
+    script: str, template: Template, cues: Sequence[tuple[float, float, str]]
+) -> NarrationTiming:
+    """전체 스크립트 1회 TTS 의 자막 큐로 섹션 경계를 계산한다.
+
+    문장 분리 방식이 코어 TTS 와 완전히 같지 않아도 되도록, 큐를 순서대로
+    누적하며 **글자수 비율**로 섹션 경계를 끊는다. 경계는 항상 큐 끝(문장 끝)에
+    맞춰 화면 전환이 말 중간에서 끊기지 않게 하고, 마지막 섹션은 오디오
+    끝까지다 — 그래서 실측 합계가 실제 렌더 오디오 길이와 정확히 같다.
+    """
+    if not cues:
+        raise TimingError("자막 큐가 비어 있어 섹션 경계를 계산할 수 없습니다")
+    if len(cues) < len(template.structure):
+        raise TimingError(
+            f"자막 큐 {len(cues)}개가 섹션 {len(template.structure)}개보다 적어 "
+            "경계를 나눌 수 없습니다 (스크립트 문장을 늘리거나 섹션을 줄이세요)"
+        )
+
+    buckets = allocate_sentences(split_sentences(script), template)
+    section_chars = [sum(len(sentence) for sentence in bucket) for bucket in buckets]
+    total_chars = sum(section_chars) or 1
+    cue_chars = [len(text) for _, _, text in cues]
+    total_cue_chars = sum(cue_chars) or 1
+
+    boundaries: list[float] = []
+    consumed = 0
+    cumulative_target = 0
+    cue_index = 0
+    for section_index in range(len(buckets) - 1):
+        cumulative_target += section_chars[section_index]
+        quota = total_cue_chars * (cumulative_target / total_chars)
+        while cue_index < len(cues) - 1 and consumed + cue_chars[cue_index] < quota:
+            consumed += cue_chars[cue_index]
+            cue_index += 1
+        boundaries.append(cues[cue_index][1])
+        consumed += cue_chars[cue_index]
+        cue_index = min(cue_index + 1, len(cues) - 1)
+    boundaries.append(cues[-1][1])
+
+    timings: list[SectionTiming] = []
+    cursor = 0.0
+    for section, bucket, end in zip(template.structure, buckets, boundaries):
+        measured = round(end - cursor, 3)
+        if measured <= 0:
+            raise TimingError(
+                f"{section.role} 섹션 경계가 뒤집혔습니다 "
+                f"(시작 {cursor:g}초, 끝 {end:g}초) — 스크립트/오디오 불일치"
+            )
+        timings.append(
+            SectionTiming(
+                role=section.role,
+                text=" ".join(bucket),
+                target_s=section.duration_s,
+                measured_s=measured,
+                start_s=round(cursor, 3),
+            )
+        )
+        cursor = end
+    return NarrationTiming(sections=tuple(timings))
+
+
+def narrate_full_script(
+    script: str,
+    template: Template,
+    *,
+    voice_name: str,
+    voice_rate: float = 1.0,
+    audio_dir: str | Path,
+    synthesize: Callable[..., object] | None = None,
+) -> tuple[NarrationTiming, NarrationAudio]:
+    """전체 스크립트를 **한 번** TTS 해서 섹션 경계와 재사용 가능한 오디오를 얻는다.
+
+    섹션마다 따로 TTS 하면 (1) 호출이 섹션 수만큼 늘고 (2) 문장 사이 호흡이
+    빠져 실측 합계가 실제 렌더 오디오와 어긋난다. 한 번만 합성하면 두 문제가
+    같이 사라지고, 그 오디오를 렌더에 그대로 넘길 수 있다.
+    """
+    if not script or not script.strip():
+        raise TimingError("스크립트가 비어 있습니다")
+
+    audio_dir = Path(audio_dir)
+    audio_dir.mkdir(parents=True, exist_ok=True)
+    audio_file = str(audio_dir / f"narration-{uuid.uuid4().hex[:8]}.mp3")
+
+    synthesize = synthesize or _core_synthesize
+    sub_maker = synthesize(
+        text=script,
+        voice_name=voice_name,
+        voice_rate=voice_rate,
+        voice_file=audio_file,
+    )
+    if sub_maker is None:
+        raise TimingError("TTS 합성에 실패했습니다 (음성/네트워크 확인)")
+
+    narration = sections_from_cues(script, template, cues_from_sub_maker(sub_maker))
+    return narration, NarrationAudio(
+        audio_file=audio_file,
+        duration_s=narration.total_s,
+        sub_maker=sub_maker,
+        voice_name=voice_name,
+        voice_rate=voice_rate,
+    )
+
+
+def _core_synthesize(
+    *, text: str, voice_name: str, voice_rate: float, voice_file: str
+) -> object:
+    """코어 TTS 호출 (지연 임포트 — 단위 테스트가 TTS 스택을 끌어오지 않도록)."""
+    from app.services import voice as voice_service
+
+    return voice_service.tts(
+        text=text,
+        voice_name=voice_service.parse_voice_name(voice_name),
+        voice_rate=voice_rate,
+        voice_file=voice_file,
+    )
 
 
 def split_sentences(script: str) -> list[str]:
@@ -139,32 +291,3 @@ def measure_narration(
         )
         cursor += measured
     return NarrationTiming(sections=tuple(timings))
-
-
-def tts_measurer(voice_name: str, voice_rate: float = 1.0) -> MeasureFn:
-    """MPT 코어 TTS 로 문장 낭독 길이를 실측하는 MeasureFn 을 만든다.
-
-    측정용 오디오는 임시 디렉터리에 쓰고 즉시 지운다. 코어 voice 모듈은
-    호출 시점에 지연 임포트한다 (플랜 단위 테스트가 TTS 스택을 로드하지
-    않도록).
-    """
-
-    def _measure(text: str) -> float:
-        from app.services import voice as voice_service
-
-        with tempfile.TemporaryDirectory(prefix="promo-timing-") as tmp_dir:
-            audio_file = os.path.join(tmp_dir, f"{uuid.uuid4().hex}.mp3")
-            sub_maker = voice_service.tts(
-                text=text,
-                voice_name=voice_service.parse_voice_name(voice_name),
-                voice_rate=voice_rate,
-                voice_file=audio_file,
-            )
-            if sub_maker is None:
-                raise TimingError(f"TTS 실측 실패 (음성/네트워크 확인): {text[:20]}...")
-            duration = float(voice_service.get_audio_duration(sub_maker))
-        if duration <= 0:
-            raise TimingError(f"TTS 실측 길이가 0입니다: {text[:20]}...")
-        return duration
-
-    return _measure

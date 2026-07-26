@@ -3,6 +3,9 @@
 실측 함수는 전부 주입한다 — 실제 TTS/네트워크 호출 없음.
 """
 
+from datetime import timedelta
+from pathlib import Path
+
 import pytest
 
 from app.promo.quality import (
@@ -14,7 +17,10 @@ from app.promo.templates.schema import validate_template
 from app.promo.timing import (
     TimingError,
     allocate_sentences,
+    cues_from_sub_maker,
     measure_narration,
+    narrate_full_script,
+    sections_from_cues,
     split_sentences,
 )
 
@@ -183,3 +189,107 @@ def test_timeline_gate_uses_default_tolerance_without_timing_declaration():
     narration = measure_narration(SCRIPT, template, _fixed_measure([3.0, 12.0, 5.0]))
 
     assert timeline_gate(narration, template).passed is True
+
+
+# --- 전체 스크립트 1회 TTS 경로 (b-3) ---------------------------------------
+
+
+class _FakeCue:
+    def __init__(self, start: float, end: float, text: str):
+        self.start = timedelta(seconds=start)
+        self.end = timedelta(seconds=end)
+        self.text = text
+
+
+class _FakeSubMaker:
+    """edge-tts 7.x 스타일 cues 를 갖는 가짜 sub_maker."""
+
+    def __init__(self, cues):
+        self.cues = cues
+
+
+class _LegacySubMaker:
+    """구형 offset/subs 구조 (코어의 다른 TTS 경로)."""
+
+    def __init__(self, pairs):
+        self.offset = [(int(s * 1e7), int(e * 1e7)) for s, e, _ in pairs]
+        self.subs = [text for _, _, text in pairs]
+
+
+def _cues_for_script():
+    """SCRIPT 의 5문장에 대응하는 큐 (총 18초)."""
+    sentences = split_sentences(SCRIPT)
+    spans = [(0.0, 2.6), (2.6, 7.0), (7.0, 11.2), (11.2, 14.4), (14.4, 18.0)]
+    return [_FakeCue(start, end, text) for (start, end), text in zip(spans, sentences)]
+
+
+def test_cues_from_sub_maker_reads_modern_and_legacy(template):
+    modern = _FakeSubMaker(_cues_for_script())
+    legacy = _LegacySubMaker([(0.0, 1.0, "가"), (1.0, 2.5, "나")])
+
+    assert cues_from_sub_maker(modern)[0][:2] == (0.0, 2.6)
+    assert cues_from_sub_maker(legacy) == [(0.0, 1.0, "가"), (1.0, 2.5, "나")]
+
+
+def test_sections_from_cues_ends_exactly_at_audio_end(template):
+    """실측 합계가 실제 오디오 길이와 정확히 같아야 렌더 오디오와 어긋나지 않는다."""
+    cues = cues_from_sub_maker(_FakeSubMaker(_cues_for_script()))
+
+    narration = sections_from_cues(SCRIPT, template, cues)
+
+    assert narration.total_s == 18.0
+    assert narration.sections[0].start_s == 0.0
+    assert narration.sections[-1].end_s == 18.0
+    # 경계는 항상 큐 끝에 맞는다 (문장 중간에서 화면이 끊기지 않는다).
+    cue_ends = {round(end, 3) for _, end, _ in cues}
+    assert all(section.end_s in cue_ends for section in narration.sections)
+
+
+def test_sections_from_cues_rejects_empty_cues(template):
+    with pytest.raises(TimingError, match="자막 큐"):
+        sections_from_cues(SCRIPT, template, [])
+
+
+def test_narrate_full_script_synthesizes_once_and_returns_audio(tmp_path, template):
+    """TTS 는 한 번만 호출되고, 그 오디오 핸들이 렌더 재사용용으로 돌아온다."""
+    calls = []
+
+    def fake_synthesize(*, text, voice_name, voice_rate, voice_file):
+        calls.append({"text": text, "voice": voice_name, "rate": voice_rate})
+        Path(voice_file).write_bytes(b"fake-audio")
+        return _FakeSubMaker(_cues_for_script())
+
+    narration, audio = narrate_full_script(
+        SCRIPT,
+        template,
+        voice_name="ko-KR-SunHiNeural-Female",
+        voice_rate=1.1,
+        audio_dir=tmp_path / "narration",
+        synthesize=fake_synthesize,
+    )
+
+    assert len(calls) == 1  # 섹션 수만큼 부르지 않는다
+    assert calls[0]["rate"] == 1.1
+    assert narration.total_s == 18.0
+    assert audio.duration_s == narration.total_s
+    assert Path(audio.audio_file).is_file()
+    assert audio.sub_maker is not None
+
+
+def test_narrate_full_script_fails_loudly_when_tts_returns_none(tmp_path, template):
+    with pytest.raises(TimingError, match="TTS 합성"):
+        narrate_full_script(
+            SCRIPT,
+            template,
+            voice_name="ko-KR-SunHiNeural-Female",
+            audio_dir=tmp_path / "narration",
+            synthesize=lambda **kwargs: None,
+        )
+
+
+def test_sections_from_cues_rejects_fewer_cues_than_sections(template):
+    """큐가 섹션보다 적으면 경계가 겹친다 — 조용히 0초 섹션을 만들지 않는다."""
+    cues = [(0.0, 5.0, "한 덩어리로 합성된 문장"), (5.0, 12.0, "두 번째 덩어리")]
+
+    with pytest.raises(TimingError, match="자막 큐 2개"):
+        sections_from_cues(SCRIPT, template, cues)

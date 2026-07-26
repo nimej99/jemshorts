@@ -169,8 +169,8 @@ fps/width 커스텀(코어 고정 1080x1920), narration_refs 간접 참조(우�
   - 스크립트를 문장으로 분리 → 섹션 목표 길이 비율대로 배분(섹션당 최소
     1문장, 원문 순서 보존) → 섹션별 낭독 길이 **실측** → 0 부터 누적으로
     섹션 경계 확정.
-  - 실측 함수는 주입식(`MeasureFn`). 기본 구현 `tts_measurer` 는 코어 TTS 를
-    지연 임포트해 쓰고, 측정 오디오는 임시 디렉터리에 쓴 뒤 즉시 지운다.
+  - 실측 함수는 주입식(`MeasureFn`) — 섹션별로 재는 경로. 기본 경로는 (b-3) 의
+    전체 스크립트 1회 합성으로 대체됐다.
   - `plan_render` 는 템플릿이 `timing.owner = "narration"` 을 선언한 경우에만
     실측한다. 결과는 `RenderPlan.narration` + `timeline_gate` 판정
     (`RenderPlan.timeline`)으로 승인 게이트에 제시되고, 실패면
@@ -195,12 +195,20 @@ fps/width 커스텀(코어 고정 1080x1920), narration_refs 간접 참조(우�
   - 리타이밍은 플랜 시점에 수행한다 — 승인 화면에 제시된 소재 = 실제
     렌더되는 소재. 소재 길이는 payload 에 함께 저장한다(구버전
     `material_urls` payload 도 계속 복원).
-- (b-3) 오디오 재생성 회피: 코어 `start(..., voice_preview={script, voice_name,
-  voice_rate, voice_volume, audio_file, duration, sub_maker})` 재사용 경로 —
-  `audio_file` 이 `utils.task_dir(task_id)` 안이고 `voice_volume == 1.0` 일 때만
-  채택된다 (`app/services/task.py:_resolve_reusable_voice_preview`). 이 경로면
-  sub_maker 가 함께 전달돼 자막도 그대로 생성된다. 현재는 실측 TTS 와 렌더
-  TTS 가 각각 호출된다(edge-tts 무료 경로 기준 허용).
+- **(b-3) 완료** — 전체 스크립트 1회 TTS + 렌더 재사용 (`app/promo/timing.py`).
+  - `narrate_full_script`: 스크립트를 **한 번만** 합성하고 sub_maker 자막 큐로
+    섹션 경계를 끊는다. 섹션마다 따로 TTS 하면 (1) 호출이 섹션 수만큼 늘고
+    (2) 문장 사이 호흡이 빠져 실측 합계가 실제 렌더 오디오와 어긋난다.
+  - 경계는 글자수 비율로 정하되 **항상 큐 끝(문장 끝)에 스냅** — 화면 전환이
+    말 중간에서 끊기지 않는다. 마지막 섹션은 오디오 끝까지라 실측 합계 =
+    실제 오디오 길이. 큐가 섹션보다 적으면 0초 섹션을 만들지 않고 거부한다.
+  - `build_voice_preview`: 실측 오디오를 `utils.task_dir(task_id)` 로 복사하고
+    sub_maker 와 함께 `start(..., voice_preview=...)` 로 넘긴다 → 렌더가 TTS 를
+    다시 하지 않고, sub_maker 가 같이 가므로 자막도 그대로 생성된다
+    (조건: `app/services/task.py:_resolve_reusable_voice_preview` — audio_file 이
+    task_dir 안 + voice_volume == 1.0 + 문안/음성 파라미터 일치).
+  - 재사용할 오디오가 없으면(교차 요청 흐름, 복원된 플랜) 코어가 평소대로 TTS 한다.
+    `sub_maker` 는 직렬화 대상이 아니라 영속화하지 않는다.
 - **(c) 완료** — 컷인 shots (`app/promo/materials/retime.py`).
   - 섹션이 `shots` 를 선언하면 실측 섹션 길이를 컷 수만큼 균등 분배하고,
     **같은 소재에서** 파생 클립을 만든다 (소상공인 소재 한 장으로 컷 변화).
