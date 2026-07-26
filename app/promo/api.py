@@ -27,7 +27,7 @@ from pydantic import BaseModel, Field
 
 from app.promo import db as promo_db
 from app.promo import pipeline, plans, scheduler, trends, uploads
-from app.promo.brandkit import crawler as brandkit_crawler
+from app.promo.brandkit import enrich as brandkit_enrich
 from app.promo.brandkit import store as brandkit_store
 from app.promo.brandkit.models import BrandKit
 from app.promo.research import (
@@ -518,47 +518,108 @@ def put_brandkit(body: BrandkitUpdateRequest):
     return kit.to_dict()
 
 
+def _apply_empty_fields(kit: BrandKit, candidates: dict) -> tuple[BrandKit, list[str]]:
+    """비어 있는 브랜드킷 필드만 후보값으로 채운다 (큐레이션 우선 정책)."""
+    changes: dict = {}
+    for key in (
+        "business_name",
+        "category",
+        "description",
+        "address",
+        "phone",
+        "sns_url",
+    ):
+        value = (candidates.get(key) or "").strip()
+        if value and not getattr(kit, key):
+            changes[key] = value
+    if changes:
+        kit = kit.touched(**changes)
+    return kit, sorted(changes)
+
+
 @router.post("/brandkit/crawl")
 def crawl_brandkit(body: BrandkitCrawlRequest):
-    """URL 을 크롤해 비어 있는 브랜드킷 필드만 채운다 (큐레이션 우선).
+    """URL 사이트를 감지해(인스타그램/일반 OG) 비어 있는 필드만 채운다.
 
-    og_image 는 원격 URL 이라 소재(photos)로 넣지 않는다 — 소재는 로컬
-    파일 경로만 허용 (compose 보안 경로 규칙).
+    - 인스타그램: Instaloader(오픈소스) 익명 수집, 실패 시 OG 폴백.
+    - 네이버 플레이스 URL: 봇 차단으로 미지원 — /brandkit/naver-local
+      (공식 지역검색 API) 안내를 502 로 반환한다.
+    - og_image 등 원격 이미지는 소재(photos)로 넣지 않는다 (보안 경로 규칙).
     """
-    result = brandkit_crawler.crawl(body.url)
+    result = brandkit_enrich.enrich(body.url)
     if result.status == "failed":
         raise HTTPException(
             status_code=502,
-            detail=f"크롤 실패: {'; '.join(result.warnings) or '알 수 없는 오류'}",
+            detail=f"수집 실패: {'; '.join(result.warnings) or '알 수 없는 오류'}",
         )
 
-    fields = result.fields
+    candidates = dict(result.fields)
+    candidates.setdefault("sns_url", body.url)
     conn = promo_db.connect()
     try:
         kit = brandkit_store.load(conn) or BrandKit(source="crawl")
-        changes: dict = {}
-        if not kit.business_name and (
-            fields.get("og_title") or fields.get("title")
-        ):
-            changes["business_name"] = fields.get("og_title") or fields["title"]
-        if not kit.description and (
-            fields.get("og_description") or fields.get("description")
-        ):
-            changes["description"] = (
-                fields.get("og_description") or fields["description"]
-            )
-        if not kit.sns_url:
-            changes["sns_url"] = body.url
-        if changes:
-            kit = kit.touched(**changes)
+        kit, applied = _apply_empty_fields(kit, candidates)
+        if applied:
             brandkit_store.save(conn, kit)
     finally:
         conn.close()
     return {
+        "site": result.site,
         "status": result.status,
-        "crawled_fields": fields,
-        "applied_fields": sorted(changes),
+        "crawled_fields": result.fields,
+        "applied_fields": applied,
         "warnings": result.warnings,
+        "brandkit": kit.to_dict(),
+    }
+
+
+class NaverLocalRequest(BaseModel):
+    query: str | None = None
+
+
+@router.post("/brandkit/naver-local")
+def naver_local_brandkit(body: NaverLocalRequest | None = None):
+    """네이버 공식 지역검색 API 로 상호 정보를 수집해 빈 필드만 채운다.
+
+    query 미지정 시 저장된 브랜드킷의 상호명으로 검색한다.
+    첫 번째 결과를 적용하고, 나머지는 candidates 로 반환한다 (UI 확인용).
+    """
+    body = body or NaverLocalRequest()
+    conn = promo_db.connect()
+    try:
+        kit = brandkit_store.load(conn)
+        query = (body.query or "").strip() or (kit.business_name if kit else "")
+        if not query:
+            raise HTTPException(
+                status_code=422,
+                detail="검색어가 없습니다: query 를 주거나 브랜드킷 상호명을 먼저 저장하세요",
+            )
+        try:
+            candidates = brandkit_enrich.naver_local_search(query)
+        except brandkit_enrich.NaverApiNotConfiguredError as exc:
+            raise HTTPException(status_code=503, detail=str(exc))
+        except brandkit_enrich.NaverApiError as exc:
+            raise HTTPException(status_code=502, detail=str(exc))
+        if not candidates:
+            raise HTTPException(
+                status_code=404, detail=f"검색 결과가 없습니다: {query}"
+            )
+
+        top = dict(candidates[0])
+        # 도로명 주소 우선, 없으면 지번 주소
+        top["address"] = top.get("road_address") or top.get("address") or ""
+        if kit is None:
+            kit = BrandKit(source="crawl")
+        kit, applied = _apply_empty_fields(kit, top)
+        if applied:
+            brandkit_store.save(conn, kit)
+    finally:
+        conn.close()
+    return {
+        "query": query,
+        "applied_fields": applied,
+        "top": candidates[0],
+        "candidates": candidates,
         "brandkit": kit.to_dict(),
     }
 
