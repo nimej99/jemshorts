@@ -276,6 +276,15 @@ upload_post_max_pending_tasks = 10
 # Promo Shorts (포크 신규 계층)
 # =============================================================================
 
+# 일일 업로드 상한 (스팸 정책 방어, 스케줄러/업로드 API 공용)
+promo_upload_daily_cap = 3
+# Google Trends 급상승 검색어 폴링 지역/신선도(시간)
+promo_trends_geo = "KR"
+promo_trends_stale_hours = 6
+# 네이버 공식 오픈API (지역검색 — 브랜드킷 상호/주소/전화 수집)
+# https://developers.naver.com 에서 무료 발급
+naver_client_id = ""
+naver_client_secret = ""
 # 업로드 백엔드: "upload_post"(기본, upload-post.com) | "postiz"(셀프호스트)
 promo_publish_backend = "upload_post"
 # Postiz 셀프호스트 (AGPL — 별도 서비스 HTTP 호출, 코드 결합 없음)
