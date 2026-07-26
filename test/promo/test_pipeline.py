@@ -169,3 +169,78 @@ def test_voice_rate_follows_template_v2_voice_speed(env):
 
     assert plan.voice_rate == 1.15
     assert build_video_params(plan).voice_rate == 1.15
+
+
+# --- 템플릿 v2 timing.owner = narration (실측 타임라인) ------------------------
+
+NARRATION_TEMPLATE_DATA = dict(
+    TEMPLATE_DATA,
+    template_id="pipeline-narration-v2",
+    version=2,
+    timing={"owner": "narration", "tolerance_s": 0.2},
+)
+
+NARRATION_SCRIPT = (
+    "드디어 나왔다, 신메뉴! 매콤하고 담백한 맛입니다. 이번 주말까지 이벤트."
+)
+
+
+def _measure_sequence(*seconds):
+    values = iter(seconds)
+
+    def _measure(text: str) -> float:
+        return next(values)
+
+    return _measure
+
+
+def _explode(text: str) -> float:
+    raise AssertionError("timing 선언이 없는데 내레이션 실측이 호출되었습니다")
+
+
+def test_v1_template_never_measures_narration(template, env):
+    plan = _make_plan(template, env, measure=_explode)
+
+    assert plan.narration is None
+    assert plan.timeline is None
+    assert plan.approved_ready is True
+
+
+def test_narration_owner_measures_and_passes_timeline_gate(env):
+    kit, stock_paths, local_dir = env
+    template = validate_template(NARRATION_TEMPLATE_DATA)
+
+    plan = plan_render(
+        template,
+        kit,
+        stock_paths,
+        NARRATION_SCRIPT,
+        local_dir,
+        measure=_measure_sequence(3.0, 8.0, 4.0),
+    )
+
+    assert plan.narration is not None
+    assert plan.narration.total_s == 15.0
+    assert plan.narration.boundaries[0] == (0.0, 3.0)
+    assert plan.timeline.passed is True
+    assert plan.approved_ready is True
+
+
+def test_narration_out_of_range_blocks_approval(env):
+    """실측 총 길이가 템플릿 범위를 벗어나면 렌더 전에 승인이 막힌다."""
+    kit, stock_paths, local_dir = env
+    template = validate_template(NARRATION_TEMPLATE_DATA)
+
+    plan = plan_render(
+        template,
+        kit,
+        stock_paths,
+        NARRATION_SCRIPT,
+        local_dir,
+        measure=_measure_sequence(9.0, 9.0, 9.0),
+    )
+
+    assert plan.timeline.passed is False
+    assert plan.structural.passed is True
+    assert plan.approved_ready is False
+    assert any("TIMELINE_COVERAGE_MISMATCH" in f for f in plan.timeline.failures)

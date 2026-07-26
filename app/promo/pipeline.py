@@ -27,8 +27,15 @@ from loguru import logger
 from app.models.schema import MaterialInfo, VideoAspect, VideoConcatMode, VideoParams
 from app.promo.brandkit.models import BrandKit
 from app.promo.materials import compose_materials
-from app.promo.quality import GateResult, TechnicalExpectation, structural_gate, technical_gate
+from app.promo.quality import (
+    GateResult,
+    TechnicalExpectation,
+    structural_gate,
+    technical_gate,
+    timeline_gate,
+)
 from app.promo.templates.schema import Template
+from app.promo.timing import MeasureFn, NarrationTiming, measure_narration, tts_measurer
 
 # 한국어 기본값 (M0 에서 번들된 리소스 기준)
 DEFAULT_VOICE_NAME = "ko-KR-SunHiNeural-Female"
@@ -57,11 +64,15 @@ class RenderPlan:
     font_name: str = DEFAULT_FONT_NAME
     language: str = DEFAULT_LANGUAGE
     subject: str = ""
+    narration: NarrationTiming | None = None
+    timeline: GateResult | None = None
 
     @property
     def approved_ready(self) -> bool:
-        """승인 게이트 통과 가능 상태 (구조 게이트 통과 기준)."""
-        return self.structural.passed
+        """승인 게이트 통과 가능 상태 (구조 + 타임라인 게이트 통과 기준)."""
+        return self.structural.passed and (
+            self.timeline is None or self.timeline.passed
+        )
 
     @property
     def voice_rate(self) -> float:
@@ -100,12 +111,18 @@ def plan_render(
     voice_name: str = DEFAULT_VOICE_NAME,
     font_name: str = DEFAULT_FONT_NAME,
     language: str = DEFAULT_LANGUAGE,
+    measure: MeasureFn | None = None,
 ) -> RenderPlan:
     """소재를 합성하고 사전 구조 게이트까지 판정한 RenderPlan 을 만든다.
 
     렌더는 하지 않는다. structural_gate 는 소재 배치만으로 판정 가능하므로
     이 단계에서 미리 실행해 승인 게이트에 함께 제시한다.
     스크립트가 비어 있으면 ValueError (조용한 빈 렌더 금지).
+
+    템플릿이 v2 `timing.owner = "narration"` 을 선언하면 섹션별 내레이션을
+    실측(기본: 코어 TTS, `measure` 로 주입 가능)해 타임라인 게이트까지
+    판정한다 — 렌더 비용을 쓰기 전에 "이 스크립트가 이 템플릿 길이에
+    맞는가"를 확정한다. 선언이 없으면 실측하지 않는다(v1 동작 그대로).
     """
     if not script or not script.strip():
         raise ValueError("script 가 비어 있습니다: 렌더 플랜을 만들 수 없습니다")
@@ -123,9 +140,21 @@ def plan_render(
         photo_warning=photo_warning,
     )
     if not structural.passed:
-        logger.warning(
-            f"plan[{plan_id}] 사전 구조 게이트 실패: {structural.failures}"
-        )
+        logger.warning(f"plan[{plan_id}] 사전 구조 게이트 실패: {structural.failures}")
+
+    narration = None
+    timeline = None
+    if template.timing is not None and template.timing.owner == "narration":
+        if measure is None:
+            measure = tts_measurer(
+                voice_name, template.voice.speed if template.voice else 1.0
+            )
+        narration = measure_narration(script, template, measure)
+        timeline = timeline_gate(narration, template)
+        if not timeline.passed:
+            logger.warning(
+                f"plan[{plan_id}] 타임라인 게이트 실패: {timeline.failures}"
+            )
 
     subject = f"{brandkit.business_name} — {template.name}"
     return RenderPlan(
@@ -140,6 +169,8 @@ def plan_render(
         font_name=font_name,
         language=language,
         subject=subject,
+        narration=narration,
+        timeline=timeline,
     )
 
 

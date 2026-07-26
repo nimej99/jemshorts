@@ -1,15 +1,43 @@
-"""promo-shorts 품질 게이트 계층 (기술 게이트 + 구조 게이트)."""
+"""promo-shorts 품질 게이트 계층 (기술 + 구조 + 타임라인 게이트)."""
 
 from app.promo.quality.gates import (
+    CODE_AUDIO_STREAM_MISSING,
+    CODE_BRAND_MATERIAL_DOWNGRADED,
+    CODE_BRAND_MATERIAL_MISSING,
+    CODE_DURATION_OUT_OF_RANGE,
+    CODE_DURATION_UNREADABLE,
+    CODE_FILE_MISSING,
+    CODE_MATERIALS_EMPTY,
+    CODE_PROBE_FAILED,
+    CODE_RESOLUTION_MISMATCH,
+    CODE_SECTION_DURATION_DRIFT,
+    CODE_SECTION_ROLE_MISSING,
+    CODE_TIMELINE_COVERAGE_MISMATCH,
+    CODE_VIDEO_STREAM_MISSING,
     GateResult,
     TechnicalExpectation,
     structural_gate,
     technical_gate,
+    timeline_gate,
 )
 
 __all__ = [
+    "CODE_AUDIO_STREAM_MISSING",
+    "CODE_BRAND_MATERIAL_DOWNGRADED",
+    "CODE_BRAND_MATERIAL_MISSING",
+    "CODE_DURATION_OUT_OF_RANGE",
+    "CODE_DURATION_UNREADABLE",
+    "CODE_FILE_MISSING",
+    "CODE_MATERIALS_EMPTY",
+    "CODE_PROBE_FAILED",
+    "CODE_RESOLUTION_MISMATCH",
+    "CODE_SECTION_DURATION_DRIFT",
+    "CODE_SECTION_ROLE_MISSING",
+    "CODE_TIMELINE_COVERAGE_MISMATCH",
+    "CODE_VIDEO_STREAM_MISSING",
     "GateResult",
     "TechnicalExpectation",
     "structural_gate",
     "technical_gate",
+    "timeline_gate",
 ]
