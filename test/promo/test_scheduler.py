@@ -252,3 +252,168 @@ def test_autopilot_technical_gate_failure_recorded(autopilot_env, monkeypatch):
     row = conn.execute("SELECT status FROM promo_plans").fetchone()
     assert row["status"] == plans.STATUS_RENDERED
     assert uploads.count_delivered_today(conn) == 0
+
+
+# ── v2 템플릿 오토파일럿 (실측 타임라인이 영속화 경로까지 타는지) ──────
+
+V2_TEMPLATE_DATA = {
+    "template_id": "sched-test-v2",
+    "name": "스케줄 v2 테스트",
+    "version": 2,
+    "mood": "upbeat",
+    "style_preset": "warm-food",
+    "timing": {"owner": "narration", "tolerance_s": 0.2},
+    "structure": [
+        {
+            "role": "hook",
+            "duration_s": 3,
+            "script_guide": "훅",
+            "material_slot": "any",
+            "headline": {"template": "{shop_name} 신메뉴", "show": True},
+            "shots": [{"kind": "wide"}, {"kind": "cutin"}],
+        },
+        {"role": "cta", "duration_s": 8, "script_guide": "행동 유도", "material_slot": "any"},
+    ],
+    "total_duration_range": [10, 15],
+    "caption_template": "{shop_name}",
+    "hashtags_base": ["테스트"],
+}
+
+
+def _fake_narrate(script, template, *, voice_name, voice_rate=1.0, audio_dir, synthesize=None):
+    from app.promo.timing import NarrationAudio, NarrationTiming, SectionTiming
+
+    narration = NarrationTiming(
+        sections=(
+            SectionTiming(role="hook", text="훅", target_s=3.0, measured_s=3.0, start_s=0.0),
+            SectionTiming(role="cta", text="행동 유도", target_s=8.0, measured_s=8.0, start_s=3.0),
+        )
+    )
+    audio = NarrationAudio(
+        audio_file=str(audio_dir) + "/fake.mp3",
+        duration_s=11.0,
+        sub_maker=object(),
+        voice_name=voice_name,
+        voice_rate=voice_rate,
+    )
+    return narration, audio
+
+
+def _fake_retime(materials, narration, storage_local_dir, *, shots=None, headlines=None, font_path=None, retime_id=None, tail_padding_s=1.0):
+    from app.models.schema import MaterialInfo
+    from app.promo.materials.retime import RetimedClip
+
+    clips = []
+    position = 0
+    for index, section in enumerate(narration.sections):
+        section_shots = list(shots[index]) if shots else []
+        count = len(section_shots) or 1
+        share = section.measured_s / count
+        for shot_index in range(count):
+            clips.append(
+                RetimedClip(
+                    material=MaterialInfo(
+                        provider="local",
+                        url=f"/tmp/sched-v2-{position}.mp4",
+                        duration=int(round(share)),
+                    ),
+                    seconds=round(share, 3),
+                    section_index=index,
+                    shot_index=shot_index,
+                )
+            )
+            position += 1
+    return clips
+
+
+@pytest.fixture()
+def autopilot_v2_env(conn, tmp_path, monkeypatch):
+    """v2 템플릿 오토파일럿 환경 — TTS/ffmpeg 만 주입, 나머지 흐름은 실제 코드."""
+    clip = tmp_path / "brand.mp4"
+    clip.write_bytes(b"dummy")
+    brandkit_store.save(conn, BrandKit(business_name="우리가게", photos=[str(clip)]))
+
+    templates_dir = tmp_path / "templates-data"
+    templates_dir.mkdir()
+    (templates_dir / "sched-test-v2.json").write_text(
+        json.dumps(V2_TEMPLATE_DATA, ensure_ascii=False), encoding="utf-8"
+    )
+    monkeypatch.setattr(scheduler, "templates_data_dir", lambda: str(templates_dir))
+
+    local_dir = tmp_path / "local_videos"
+    local_dir.mkdir()
+    monkeypatch.setattr(
+        scheduler.utils, "storage_dir", lambda sub="", create=False: str(local_dir)
+    )
+
+    from app.services import llm
+
+    monkeypatch.setattr(llm, "_generate_response", lambda prompt: "훅 문장. 행동 유도 문장.")
+
+    # v2 경로: 실측/리타이밍은 주입 (실제 TTS/ffmpeg 없이 흐름만 검증)
+    monkeypatch.setattr(pipeline, "narrate_full_script", _fake_narrate)
+    monkeypatch.setattr(pipeline, "retime_materials", _fake_retime)
+
+    video = tmp_path / "final-v2.mp4"
+    video.write_bytes(b"x")
+
+    def fake_execute(plan, *, task_id=None, **kwargs):
+        return pipeline.RenderResult(
+            task_id=task_id,
+            plan_id=plan.plan_id,
+            videos=(str(video),),
+            render_seconds=1.0,
+            technical=GateResult(passed=True, failures=[], warnings=[]),
+        )
+
+    monkeypatch.setattr(pipeline, "execute_render", fake_execute)
+
+    from app.services import upload_post
+
+    monkeypatch.setattr(
+        upload_post, "cross_post_video", lambda *a, **k: {"success": True, "request_id": "req-v2"}
+    )
+    return conn
+
+
+def test_autopilot_v2_persists_measured_timeline(autopilot_v2_env):
+    """v2 오토파일럿: 실측 타임라인/컷 분할이 플랜 영속화까지 살아 있다."""
+    conn = autopilot_v2_env
+    outcome = scheduler.run_autopilot_once(conn)
+
+    assert outcome["request_id"] == "req-v2"
+    row = plans.get_row(conn, outcome["plan_id"])
+    assert row["status"] == plans.STATUS_RENDERED
+
+    restored = plans.restore_plan(row)
+    assert restored.template.version == 2
+    assert restored.narration is not None
+    assert restored.narration.total_s == 11.0
+    assert restored.clip_seconds == (1.5, 1.5, 8.0)  # hook 2컷 분할 반영
+    assert restored.timeline is not None and restored.timeline.passed
+
+
+def test_tick_survives_v2_tts_failure_as_missed(autopilot_v2_env, monkeypatch):
+    """v2 TTS 실패(TimingError)는 SchedulerError 가 아니지만 tick 이 missed 로 흡수한다.
+
+    v2 는 무인 오토파일럿 경로에 네트워크 TTS 호출을 추가한다 — 그게 실패해도
+    스케줄러가 죽지 않고 missed run 으로 기록해야 한다.
+    """
+    from app.promo.timing import TimingError
+
+    conn = autopilot_v2_env
+
+    def failing_narrate(*args, **kwargs):
+        raise TimingError("TTS 합성에 실패했습니다 (음성/네트워크 확인)")
+
+    monkeypatch.setattr(pipeline, "narrate_full_script", failing_narrate)
+
+    scheduler.set_frequency(conn, 2, now=NOW)
+    due = _rewind_first_run(conn)
+
+    report = scheduler.tick(conn, now=NOW)  # 실제 run_autopilot_once 경유
+
+    assert report["status"] == "ok"  # tick 자체는 예외로 죽지 않는다
+    assert report["ran"] == []
+    assert [entry["run"] for entry in report["missed"]] == [due]
+    assert "TTS 합성" in report["missed"][0]["cause"]
