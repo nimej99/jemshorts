@@ -28,7 +28,7 @@ from loguru import logger
 from app.models.schema import MaterialInfo, VideoAspect, VideoConcatMode, VideoParams
 from app.promo.brandkit.models import BrandKit
 from app.promo.materials import compose_materials, retime_materials
-from app.promo.materials.retime import DEFAULT_TAIL_PADDING_S
+from app.promo.materials.retime import RetimedClip
 from app.promo.quality import (
     GateResult,
     TechnicalExpectation,
@@ -70,6 +70,8 @@ class RenderPlan:
     subject: str = ""
     narration: NarrationTiming | None = None
     timeline: GateResult | None = None
+    # 리타이밍된 클립별 정확한 길이(초). materials 와 같은 순서/개수.
+    clip_seconds: tuple[float, ...] = ()
 
     @property
     def approved_ready(self) -> bool:
@@ -89,16 +91,15 @@ class RenderPlan:
 
     @property
     def clip_duration_s(self) -> int:
-        """코어 `max_clip_duration`. 실측 타임라인이 있으면 가장 긴 섹션에 맞춘다.
+        """코어 `max_clip_duration`. 리타이밍된 클립 중 가장 긴 것에 맞춘다.
 
-        소재가 이미 섹션 실측 길이이므로 이 값이 그보다 크거나 같아야 코어가
-        클립을 더 쪼개지 않는다 (= 화면 전환이 섹션 경계와 일치). 마지막
-        섹션에 붙는 꼬리 여유(retime.DEFAULT_TAIL_PADDING_S)까지 감안한다.
+        클립이 이미 섹션(또는 컷) 길이이므로 이 값이 그보다 크거나 같아야
+        코어가 클립을 더 쪼개지 않는다 (= 화면 전환이 섹션/컷 경계와 일치).
+        마지막 클립의 꼬리 여유까지 이미 clip_seconds 에 반영돼 있다.
         """
-        if self.narration is None:
+        if not self.clip_seconds:
             return DEFAULT_CLIP_DURATION_S
-        longest = max(section.measured_s for section in self.narration.sections)
-        return max(DEFAULT_CLIP_DURATION_S, math.ceil(longest + DEFAULT_TAIL_PADDING_S))
+        return max(DEFAULT_CLIP_DURATION_S, math.ceil(max(self.clip_seconds)))
 
 
 @dataclass(frozen=True)
@@ -129,7 +130,7 @@ def plan_render(
     font_name: str = DEFAULT_FONT_NAME,
     language: str = DEFAULT_LANGUAGE,
     measure: MeasureFn | None = None,
-    retime: Callable[..., list[MaterialInfo]] | None = None,
+    retime: Callable[..., list[RetimedClip]] | None = None,
 ) -> RenderPlan:
     """소재를 합성하고 사전 구조 게이트까지 판정한 RenderPlan 을 만든다.
 
@@ -162,6 +163,7 @@ def plan_render(
         logger.warning(f"plan[{plan_id}] 사전 구조 게이트 실패: {structural.failures}")
 
     narration = None
+    clip_seconds: tuple[float, ...] = ()
     timeline = None
     if template.timing is not None and template.timing.owner == "narration":
         if measure is None:
@@ -172,13 +174,20 @@ def plan_render(
         timeline = timeline_gate(narration, template)
         if not timeline.passed:
             logger.warning(f"plan[{plan_id}] 타임라인 게이트 실패: {timeline.failures}")
-        # 실측 경계를 화면에 반영한다: 섹션 소재를 실측 길이 클립으로 다시 만든다.
+        # 실측 경계를 화면에 반영한다: 섹션 소재를 실측 길이 클립으로 다시 만들고,
+        # 섹션이 shots 를 선언했으면 같은 소재에서 와이드/컷인 파생 클립을 만든다.
         # 승인 게이트에 제시되는 소재 = 실제 렌더되는 소재를 유지하기 위해
         # 렌더 시점이 아니라 플랜 시점에 만든다.
         retime_fn = retime or retime_materials
-        materials = retime_fn(
-            materials, narration, storage_local_dir, retime_id=plan_id
+        clips = retime_fn(
+            materials,
+            narration,
+            storage_local_dir,
+            shots=[section.shots for section in template.structure],
+            retime_id=plan_id,
         )
+        materials = [clip.material for clip in clips]
+        clip_seconds = tuple(clip.seconds for clip in clips)
 
     subject = f"{brandkit.business_name} — {template.name}"
     return RenderPlan(
@@ -194,6 +203,7 @@ def plan_render(
         language=language,
         subject=subject,
         narration=narration,
+        clip_seconds=clip_seconds,
         timeline=timeline,
     )
 

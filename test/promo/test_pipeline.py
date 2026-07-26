@@ -13,7 +13,7 @@ import pytest
 from app.models import const
 from app.models.schema import MaterialInfo, VideoAspect, VideoConcatMode
 from app.promo.brandkit.models import BrandKit
-from app.promo.materials import probe_duration
+from app.promo.materials import RetimedClip, probe_duration
 from app.promo.pipeline import (
     PipelineError,
     build_video_params,
@@ -198,17 +198,28 @@ def _measure_sequence(*seconds):
     return _measure
 
 
-def _fake_retime(materials, narration, storage_local_dir, *, retime_id=None):
+def _fake_retime(materials, narration, storage_local_dir, *, shots=None, retime_id=None):
     """ffmpeg 없이 리타이밍 결과 모양만 흉내낸다 (실제 리타이밍은 test_retime.py)."""
     assert len(materials) == len(narration.sections)
-    return [
-        MaterialInfo(
-            provider="local",
-            url=f"{material.url}#retimed-{section.measured_s:g}",
-            duration=int(round(section.measured_s)),
-        )
-        for material, section in zip(materials, narration.sections)
-    ]
+    clips = []
+    for index, (material, section) in enumerate(zip(materials, narration.sections)):
+        section_shots = list(shots[index]) if shots else []
+        count = len(section_shots) or 1
+        share = section.measured_s / count
+        for shot_index in range(count):
+            clips.append(
+                RetimedClip(
+                    material=MaterialInfo(
+                        provider="local",
+                        url=f"{material.url}#retimed-{index}-{shot_index}",
+                        duration=int(round(share)),
+                    ),
+                    seconds=round(share, 3),
+                    section_index=index,
+                    shot_index=shot_index,
+                )
+            )
+    return clips
 
 
 def _explode(text: str) -> float:
@@ -280,9 +291,9 @@ def test_clip_duration_follows_longest_measured_section(env):
         retime=_fake_retime,
     )
 
-    # 가장 긴 섹션 8.4초 + 꼬리 여유 1.0초 -> 올림 10
-    assert plan.clip_duration_s == 10
-    assert build_video_params(plan).video_clip_duration == 10
+    # 가장 긴 클립 8.4초 -> 올림 9 (꼬리 여유는 마지막 클립에만 붙는다)
+    assert plan.clip_duration_s == 9
+    assert build_video_params(plan).video_clip_duration == 9
     assert [m.duration for m in plan.materials] == [3, 8, 4]
 
 
@@ -336,4 +347,32 @@ def test_plan_retimes_real_materials_to_measured_lengths(tmp_path):
         assert "retime-plan" in material.url
         expected = section.measured_s + (1.0 if section.role == "cta" else 0.0)
         assert abs(probe_duration(material.url) - expected) <= 0.15
-    assert plan.clip_duration_s == 9
+    # body 8초가 가장 긴 클립 (cta 는 4+1=5초)
+    assert plan.clip_duration_s == 8
+
+
+def test_section_shots_expand_into_multiple_clips(env):
+    """섹션이 shots 를 선언하면 소재 한 장에서 컷 수만큼 클립이 나온다."""
+    kit, stock_paths, local_dir = env
+    data = dict(NARRATION_TEMPLATE_DATA, template_id="pipeline-shots-v2")
+    data["structure"] = [dict(section) for section in NARRATION_TEMPLATE_DATA["structure"]]
+    data["structure"][0]["shots"] = [
+        {"kind": "wide", "motion": "push-in"},
+        {"kind": "cutin", "crop": "center-zoom"},
+    ]
+
+    plan = plan_render(
+        validate_template(data),
+        kit,
+        stock_paths,
+        NARRATION_SCRIPT,
+        local_dir,
+        measure=_measure_sequence(3.0, 8.0, 4.0),
+        retime=_fake_retime,
+    )
+
+    # hook 3초가 2컷으로 쪼개지고 나머지 섹션은 1컷씩 = 총 4클립
+    assert len(plan.materials) == 4
+    assert plan.clip_seconds == (1.5, 1.5, 8.0, 4.0)
+    assert plan.narration.total_s == 15.0  # 타임라인 총 길이는 그대로
+    assert plan.clip_duration_s == 8

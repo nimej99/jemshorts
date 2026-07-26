@@ -90,6 +90,15 @@ def _materials_from_payload(payload: dict) -> tuple[MaterialInfo, ...]:
     )
 
 
+def _clip_seconds_from_payload(payload: dict) -> tuple[float, ...]:
+    """리타이밍 클립 길이(초)를 복원한다. 구버전/미리타이밍 플랜은 빈 튜플."""
+    entries = payload.get("materials") or []
+    seconds = [entry.get("seconds") for entry in entries]
+    if not seconds or any(value is None for value in seconds):
+        return ()
+    return tuple(float(value) for value in seconds)
+
+
 def save_plan(conn: sqlite3.Connection, plan: RenderPlan, template_raw: dict) -> None:
     """플랜을 planned 상태로 저장한다. plan_id 중복이면 sqlite3.IntegrityError."""
     payload = {
@@ -98,7 +107,10 @@ def save_plan(conn: sqlite3.Connection, plan: RenderPlan, template_raw: dict) ->
         # 리타이밍 이후 소재는 길이(초)까지 의미를 갖는다 — url 만 저장하면
         # 복원된 플랜이 승인 시점과 달라진다.
         "materials": [
-            {"url": m.url, "duration": int(m.duration)} for m in plan.materials
+            {"url": m.url, "duration": int(m.duration), "seconds": seconds}
+            for m, seconds in zip(
+                plan.materials, plan.clip_seconds or [None] * len(plan.materials)
+            )
         ],
         "used_brand_count": plan.used_brand_count,
         "photo_warning": plan.photo_warning,
@@ -141,6 +153,7 @@ def restore_plan(row: sqlite3.Row) -> RenderPlan:
         template=template,
         script=payload["script"],
         materials=_materials_from_payload(payload),
+        clip_seconds=_clip_seconds_from_payload(payload),
         used_brand_count=int(payload["used_brand_count"]),
         photo_warning=bool(payload["photo_warning"]),
         structural=_gate_from_dict(payload["structural"]),

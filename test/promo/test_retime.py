@@ -16,7 +16,9 @@ from app.promo.materials import (
     retime_material,
     retime_materials,
 )
+from app.promo.materials import build_shot_filter, probe_dimensions
 from app.promo.materials.retime import CORE_TAIL_MARGIN_S, DEFAULT_TAIL_PADDING_S
+from app.promo.templates.schema import Shot
 from app.promo.timing import NarrationTiming, SectionTiming
 
 pytestmark = pytest.mark.skipif(
@@ -156,13 +158,14 @@ def test_retime_materials_matches_measured_sections(tmp_path):
         materials, narration, local_dir, retime_id="t1", tail_padding_s=1.0
     )
 
-    assert [m.duration for m in retimed] == [2, 8, 5]
-    expected = [2.5, 8.0, 5.0]  # 마지막 섹션에만 꼬리 여유 +1.0초
-    for material, section, target in zip(retimed, narration.sections, expected):
+    assert [clip.material.duration for clip in retimed] == [2, 8, 5]
+    assert [clip.seconds for clip in retimed] == [2.5, 8.0, 5.0]  # 마지막에만 +1.0초
+    assert [(c.section_index, c.shot_index) for c in retimed] == [(0, 0), (1, 0), (2, 0)]
+    for clip, section in zip(retimed, narration.sections):
         # 산출물은 보안 경로(storage/local_videos) 안에 있어야 코어가 받는다.
-        assert material.url.startswith(str(local_dir.resolve()))
-        assert section.role in material.url
-        assert abs(probe_duration(material.url) - target) <= _TOLERANCE_S
+        assert clip.material.url.startswith(str(local_dir.resolve()))
+        assert section.role in clip.material.url
+        assert abs(probe_duration(clip.material.url) - clip.seconds) <= _TOLERANCE_S
 
 
 def test_retime_materials_rejects_count_mismatch(tmp_path):
@@ -194,3 +197,121 @@ def test_default_tail_padding_covers_core_safety_margin():
 
     assert CORE_TAIL_MARGIN_S == _VIDEO_DURATION_SAFETY_MARGIN
     assert DEFAULT_TAIL_PADDING_S >= CORE_TAIL_MARGIN_S
+
+
+# --- 템플릿 v2 shots: 와이드 + 컷인 파생 클립 -------------------------------
+
+
+def _frame_signature(path: str, at_s: float = 0.2) -> str:
+    """클립의 한 프레임을 PNG 로 뽑아 내용 해시를 만든다 (화면이 다른지 판별)."""
+    import hashlib
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmp:
+        png = f"{tmp}/frame.png"
+        subprocess.run(
+            [
+                "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+                "-ss", str(at_s), "-i", path, "-frames:v", "1", png,
+            ],
+            check=True,
+            capture_output=True,
+            timeout=60,
+        )
+        return hashlib.sha256(open(png, "rb").read()).hexdigest()
+
+
+def _pattern_video(path, seconds: float) -> str:
+    """중앙과 주변이 다른 패턴 영상 (컷인 크롭이 실제로 다른 화면인지 보려고)."""
+    subprocess.run(
+        [
+            "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+            "-f", "lavfi", "-i", f"testsrc=size=640x360:duration={seconds}:rate=30",
+            "-pix_fmt", "yuv420p", str(path),
+        ],
+        check=True,
+        capture_output=True,
+        timeout=120,
+    )
+    return str(path)
+
+
+def test_shots_split_section_and_derive_distinct_frames(tmp_path):
+    """와이드+컷인 2컷: 섹션 길이를 균등 분배하고 화면이 실제로 달라진다."""
+    local_dir = tmp_path / "local_videos"
+    local_dir.mkdir()
+    materials = [
+        MaterialInfo(provider="local", url=_pattern_video(tmp_path / "a.mp4", 6))
+    ]
+    narration = NarrationTiming(sections=(_section("hook", 6.0, 0.0),))
+    shots = [
+        (
+            Shot(kind="wide"),
+            Shot(kind="cutin", crop="center-zoom"),
+        )
+    ]
+
+    clips = retime_materials(
+        materials, narration, local_dir, shots=shots, retime_id="s1", tail_padding_s=0.5
+    )
+
+    assert [(c.section_index, c.shot_index) for c in clips] == [(0, 0), (0, 1)]
+    # 6초를 2컷으로 균등 분배, 마지막 컷에만 꼬리 여유 +0.5초
+    assert [c.seconds for c in clips] == [3.0, 3.5]
+    for clip in clips:
+        assert abs(probe_duration(clip.material.url) - clip.seconds) <= _TOLERANCE_S
+    # 컷인은 같은 소재에서 나왔지만 화면(프레이밍)이 달라야 의미가 있다.
+    assert _frame_signature(clips[0].material.url) != _frame_signature(
+        clips[1].material.url
+    )
+    # 해상도는 유지된다 (코어가 받는 소재 규격 불변).
+    assert probe_dimensions(clips[0].material.url) == probe_dimensions(
+        clips[1].material.url
+    )
+
+
+@pytest.mark.parametrize(
+    "motion", ["static", "push-in", "pull-out", "drift", "pan-left", "pan-right"]
+)
+def test_every_motion_renders_valid_clip(tmp_path, motion):
+    """스키마가 허용하는 모션은 전부 실제로 렌더돼야 한다 (선언만 되고 죽은 값 금지)."""
+    source = _pattern_video(tmp_path / "src.mp4", 3)
+    output = str(tmp_path / f"out-{motion}.mp4")
+
+    retime_material(source, 2.0, output, shot=Shot(kind="wide", motion=motion))
+
+    assert abs(probe_duration(output) - 2.0) <= _TOLERANCE_S
+    assert probe_dimensions(output) == (640, 360)
+
+
+@pytest.mark.parametrize("crop", ["center-zoom", "top", "bottom", "left", "right"])
+def test_every_crop_renders_distinct_framing(tmp_path, crop):
+    """스키마가 허용하는 크롭은 전부 렌더되고 전체 화면과 달라야 한다."""
+    source = _pattern_video(tmp_path / "src.mp4", 3)
+    wide = str(tmp_path / "wide.mp4")
+    cut = str(tmp_path / f"cut-{crop}.mp4")
+
+    retime_material(source, 1.5, wide, shot=Shot(kind="wide"))
+    retime_material(source, 1.5, cut, shot=Shot(kind="cutin", crop=crop))
+
+    assert abs(probe_duration(cut) - 1.5) <= _TOLERANCE_S
+    assert _frame_signature(wide) != _frame_signature(cut)
+
+
+def test_wide_without_motion_needs_no_filter(tmp_path):
+    """와이드 정지컷은 필터 없이 그대로 간다 (불필요한 재프레이밍 금지)."""
+    source = _pattern_video(tmp_path / "src.mp4", 2)
+
+    assert build_shot_filter(Shot(kind="wide"), 2.0, source) is None
+    assert build_shot_filter(None, 2.0, source) is None
+    assert build_shot_filter(Shot(kind="cutin"), 2.0, source) is not None
+
+
+def test_shots_count_mismatch_rejected(tmp_path):
+    local_dir = tmp_path / "local_videos"
+    local_dir.mkdir()
+    materials = [MaterialInfo(provider="local", url=_make_video(tmp_path / "a.mp4", 2))]
+    narration = NarrationTiming(sections=(_section("hook", 2.0, 0.0),))
+
+    with pytest.raises(RetimeError, match="샷 선언"):
+        retime_materials(materials, narration, local_dir, shots=[(), ()])

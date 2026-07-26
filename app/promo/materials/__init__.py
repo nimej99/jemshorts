@@ -3,6 +3,9 @@
 from app.promo.materials.compose import compose_materials
 from app.promo.materials.retime import (
     RetimeError,
+    RetimedClip,
+    build_shot_filter,
+    probe_dimensions,
     probe_duration,
     retime_material,
     retime_materials,
@@ -10,7 +13,10 @@ from app.promo.materials.retime import (
 
 __all__ = [
     "RetimeError",
+    "RetimedClip",
+    "build_shot_filter",
     "compose_materials",
+    "probe_dimensions",
     "probe_duration",
     "retime_material",
     "retime_materials",

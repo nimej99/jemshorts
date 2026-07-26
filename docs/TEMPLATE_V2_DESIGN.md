@@ -201,7 +201,17 @@ fps/width 커스텀(코어 고정 1080x1920), narration_refs 간접 참조(우�
   채택된다 (`app/services/task.py:_resolve_reusable_voice_preview`). 이 경로면
   sub_maker 가 함께 전달돼 자막도 그대로 생성된다. 현재는 실측 TTS 와 렌더
   TTS 가 각각 호출된다(edge-tts 무료 경로 기준 허용).
-- (c) 컷인 shots: 동일 소재 crop/zoom 파생 클립 생성 (ffmpeg crop+scale)
+- **(c) 완료** — 컷인 shots (`app/promo/materials/retime.py`).
+  - 섹션이 `shots` 를 선언하면 실측 섹션 길이를 컷 수만큼 균등 분배하고,
+    **같은 소재에서** 파생 클립을 만든다 (소상공인 소재 한 장으로 컷 변화).
+  - 크롭 5종(center-zoom/top/bottom/left/right)은 정지 crop, 모션 6종은
+    줌(`zoompan`, 프레임별 z)과 팬(`crop` 의 시간 의존 x/y)으로 구현.
+    crop 의 w/h 는 설정 시점 1회 평가라 줌에 못 쓴다는 걸 실측으로 확인하고
+    zoompan 으로 갈랐다.
+  - 필터 체인 끝에서 원본 해상도로 되돌린다 (코어가 받는 소재 규격 불변).
+  - 와이드 정지컷은 필터를 아예 붙이지 않는다(불필요한 재인코딩 화질 손실 방지).
+  - `RenderPlan.clip_seconds` 로 클립별 정확한 길이를 들고 다니며
+    `clip_duration_s` 계산과 영속화에 쓴다.
 - (d) headline 오버레이: moviepy TextClip 레이어 (코어 자막과 독립)
 - (e) style_preset → 소재 생성 프롬프트 (ComfyUI/외부 API 연동 시)
 
