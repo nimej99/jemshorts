@@ -18,6 +18,8 @@ MPT 코어는 수정하지 않는다. task_service/state 는 execute_render 내�
 from __future__ import annotations
 
 import math
+import os
+import shutil
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -37,7 +39,13 @@ from app.promo.quality import (
     timeline_gate,
 )
 from app.promo.templates.schema import Template
-from app.promo.timing import MeasureFn, NarrationTiming, measure_narration, tts_measurer
+from app.promo.timing import (
+    MeasureFn,
+    NarrationAudio,
+    NarrationTiming,
+    measure_narration,
+    narrate_full_script,
+)
 
 # 한국어 기본값 (M0 에서 번들된 리소스 기준)
 DEFAULT_VOICE_NAME = "ko-KR-SunHiNeural-Female"
@@ -72,6 +80,9 @@ class RenderPlan:
     timeline: GateResult | None = None
     # 리타이밍된 클립별 정확한 길이(초). materials 와 같은 순서/개수.
     clip_seconds: tuple[float, ...] = ()
+    # 실측에 쓴 전체 스크립트 오디오 (같은 프로세스에서 렌더로 이어질 때 재사용).
+    # 영속화하지 않는다 — sub_maker 는 직렬화 대상이 아니다.
+    narration_audio: NarrationAudio | None = None
 
     @property
     def approved_ready(self) -> bool:
@@ -163,14 +174,24 @@ def plan_render(
         logger.warning(f"plan[{plan_id}] 사전 구조 게이트 실패: {structural.failures}")
 
     narration = None
+    narration_audio = None
     clip_seconds: tuple[float, ...] = ()
     timeline = None
     if template.timing is not None and template.timing.owner == "narration":
-        if measure is None:
-            measure = tts_measurer(
-                voice_name, template.voice.speed if template.voice else 1.0
+        voice_rate = template.voice.speed if template.voice else 1.0
+        if measure is not None:
+            # 주입된 실측 함수 (테스트/대체 TTS 경로) — 섹션별로 잰다.
+            narration = measure_narration(script, template, measure)
+        else:
+            # 기본 경로: 전체 스크립트를 한 번만 합성해 경계를 끊고, 그 오디오를
+            # 렌더에 재사용한다 (TTS 호출 1회 + 실측 합계 = 실제 렌더 오디오 길이).
+            narration, narration_audio = narrate_full_script(
+                script,
+                template,
+                voice_name=voice_name,
+                voice_rate=voice_rate,
+                audio_dir=narration_audio_dir(),
             )
-        narration = measure_narration(script, template, measure)
         timeline = timeline_gate(narration, template)
         if not timeline.passed:
             logger.warning(f"plan[{plan_id}] 타임라인 게이트 실패: {timeline.failures}")
@@ -204,9 +225,55 @@ def plan_render(
         language=language,
         subject=subject,
         narration=narration,
+        narration_audio=narration_audio,
         clip_seconds=clip_seconds,
         timeline=timeline,
     )
+
+
+
+def narration_audio_dir() -> str:
+    """실측 내레이션 오디오를 두는 디렉터리 (storage/promo_narration)."""
+    from app.utils import utils
+
+    return utils.storage_dir("promo_narration", create=True)
+
+
+def build_voice_preview(plan: RenderPlan, task_id: str) -> dict | None:
+    """플랜 실측 오디오를 코어 task 가 재사용할 수 있는 형태로 만든다.
+
+    코어(`app/services/task.py:_resolve_reusable_voice_preview`)는 오디오가
+    `utils.task_dir(task_id)` 안에 있고 문안/음성 파라미터가 일치할 때만
+    재사용한다. 그래서 여기서 task 디렉터리로 복사한 뒤 sub_maker 와 함께
+    넘긴다 — sub_maker 가 같이 가야 자막이 그대로 생성된다.
+
+    재사용할 오디오가 없으면 None (코어가 평소대로 TTS 한다).
+    """
+    audio = plan.narration_audio
+    if audio is None:
+        return None
+
+    from app.utils import utils
+
+    if not os.path.isfile(audio.audio_file):
+        logger.warning(
+            f"plan[{plan.plan_id}] 실측 오디오가 없어 재사용을 건너뜁니다: "
+            f"{audio.audio_file}"
+        )
+        return None
+
+    destination = os.path.join(utils.task_dir(task_id), "audio.mp3")
+    if os.path.realpath(destination) != os.path.realpath(audio.audio_file):
+        shutil.copy2(audio.audio_file, destination)
+    return {
+        "script": plan.script.strip(),
+        "voice_name": plan.voice_name,
+        "voice_rate": float(plan.voice_rate),
+        "voice_volume": 1.0,
+        "audio_file": destination,
+        "duration": float(audio.duration_s),
+        "sub_maker": audio.sub_maker,
+    }
 
 
 def headline_texts(template: Template, brandkit: BrandKit) -> list[str | None]:
@@ -294,8 +361,20 @@ def execute_render(
         task_id = f"promo-{uuid.uuid4().hex[:8]}"
 
     params = build_video_params(plan, n_threads=n_threads)
+    voice_preview = build_voice_preview(plan, task_id)
     started_at = time.monotonic()
-    result = task_runner(task_id, params, stop_at="video")
+    if voice_preview is None:
+        result = task_runner(task_id, params, stop_at="video")
+    else:
+        # 플랜 실측 때 만든 오디오를 그대로 넘긴다 — TTS 재호출도, 실측과
+        # 렌더 오디오 길이가 어긋날 일도 없다.
+        logger.info(
+            f"render[{task_id}] 실측 오디오 재사용 "
+            f"({voice_preview['duration']:g}초, TTS 재합성 생략)"
+        )
+        result = task_runner(
+            task_id, params, stop_at="video", voice_preview=voice_preview
+        )
     render_seconds = time.monotonic() - started_at
 
     task_state = state_getter(task_id) or {}
