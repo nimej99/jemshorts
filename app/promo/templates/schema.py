@@ -16,7 +16,7 @@
 - hashtags_base: 기본 해시태그 문자열 배열
 
 v2 선택 필드 (전부 optional — 없으면 v1 동작 그대로, 렌더러 무접촉):
-- style_preset: 소재 생성 프롬프트 프리셋 키
+- style_preset: 소재 생성 프롬프트 프리셋 키 (templates.style_presets 의 닫힌 어휘)
 - voice: {speed: 0.5~2.0}
 - timing: {owner: "narration" | "template", tolerance_s: 0 초과 1.0 이하}
     narration = TTS 실측이 섹션 경계를 결정한다는 선언 (렌더러 반영은 후속 단계)
@@ -39,6 +39,8 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from pathlib import Path
+
+from app.promo.templates.style_presets import VALID_STYLE_PRESETS
 
 VALID_MOODS = ("upbeat", "calm", "energetic")
 VALID_ROLES = ("hook", "body", "cta")
@@ -357,9 +359,15 @@ def validate_template(data: object, source: str = "<template>") -> Template:
         )
     _reject_v2_fields(data, V2_TEMPLATE_FIELDS, version, "", source)
 
-    style_preset = (
-        _require_str(data, "style_preset", source) if "style_preset" in data else None
-    )
+    style_preset = None
+    if "style_preset" in data:
+        style_preset = _require_str(data, "style_preset", source)
+        if style_preset not in VALID_STYLE_PRESETS:
+            raise _err(
+                source,
+                f"'style_preset' '{style_preset}' 은 유효하지 않습니다 "
+                f"(허용: {', '.join(VALID_STYLE_PRESETS)})",
+            )
     voice = _parse_voice(data["voice"], source) if "voice" in data else None
     timing = _parse_timing(data["timing"], source) if "timing" in data else None
 

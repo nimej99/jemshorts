@@ -5,6 +5,11 @@ from app.promo.research.hints import (
     build_script_prompt,
     char_budget,
 )
+from app.promo.research.material_prompts import (
+    MaterialPrompt,
+    MaterialPromptError,
+    build_material_prompts,
+)
 from app.promo.research.ingest import (
     Cue,
     ReferenceStats,
@@ -16,10 +21,13 @@ from app.promo.research.ingest import (
 
 __all__ = [
     "Cue",
+    "MaterialPrompt",
+    "MaterialPromptError",
     "DEFAULT_CHARS_PER_SEC",
     "ReferenceStats",
     "ResearchToolMissingError",
     "analyze_reference",
+    "build_material_prompts",
     "build_script_prompt",
     "char_budget",
     "fetch_subtitles",

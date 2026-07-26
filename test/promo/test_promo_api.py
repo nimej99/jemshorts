@@ -580,3 +580,77 @@ def test_script_prompt_use_trends(client):
     ).json()
     assert plain["trend_keywords"] == []
     assert "[트렌드]" not in plain["prompt"]
+
+
+# ---------------------------------------------------------------------------
+# 소재 생성 프롬프트 (템플릿 v2 style_preset)
+# ---------------------------------------------------------------------------
+
+
+V2_TEMPLATE_DATA = {
+    **TEMPLATE_DATA,
+    "template_id": "api-test-v2",
+    "version": 2,
+    "style_preset": "warm-food",
+    "structure": [
+        {
+            "role": "hook",
+            "duration_s": 3,
+            "script_guide": "훅",
+            "material_slot": "any",
+            "feel": "따뜻한",
+            "shots": [{"kind": "wide"}, {"kind": "cutin"}],
+        },
+        {
+            "role": "cta",
+            "duration_s": 8,
+            "script_guide": "행동 유도",
+            "material_slot": "photo",
+        },
+    ],
+}
+
+
+def _write_v2_template(tmp_path):
+    (tmp_path / "templates-data" / "api-test-v2.json").write_text(
+        json.dumps(V2_TEMPLATE_DATA, ensure_ascii=False), encoding="utf-8"
+    )
+
+
+def test_material_prompts_returns_prompt_per_shot(client, tmp_path):
+    _write_v2_template(tmp_path)
+
+    response = client.post(
+        "/api/v1/promo/material-prompts", json={"template_id": "api-test-v2"}
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["style_preset"] == "warm-food"
+    # hook 2컷 + cta 1컷
+    assert [(p["section_index"], p["shot_index"]) for p in data["prompts"]] == [
+        (0, 0),
+        (0, 1),
+        (1, 0),
+    ]
+    assert all("9:16" in p["prompt"] for p in data["prompts"])
+    assert all(p["negative_prompt"] for p in data["prompts"])
+    assert "tight detail cut-in" in data["prompts"][1]["prompt"]
+
+
+def test_material_prompts_without_style_preset_400(client):
+    """v1 템플릿에는 스타일 선언이 없다 — 기본값으로 얼버무리지 않고 400."""
+    response = client.post(
+        "/api/v1/promo/material-prompts", json={"template_id": "api-test-v1"}
+    )
+
+    assert response.status_code == 400
+    assert "style_preset" in response.json()["detail"]
+
+
+def test_material_prompts_unknown_template_404(client):
+    response = client.post(
+        "/api/v1/promo/material-prompts", json={"template_id": "nope"}
+    )
+
+    assert response.status_code == 404
