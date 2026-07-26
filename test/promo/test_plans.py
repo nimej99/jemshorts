@@ -9,6 +9,7 @@ import json
 import pytest
 
 from app.models.schema import MaterialInfo
+from app.promo.materials import RetimedClip
 from app.promo import db as promo_db
 from app.promo import plans
 from app.promo.brandkit.models import BrandKit
@@ -30,15 +31,20 @@ TEMPLATE_DATA = {
 }
 
 
-def _fake_retime(materials, narration, storage_local_dir, *, retime_id=None):
+def _fake_retime(materials, narration, storage_local_dir, *, shots=None, retime_id=None):
     """ffmpeg 없이 리타이밍 산출물 모양만 흉내낸다 (실제 검증은 test_retime.py)."""
     return [
-        MaterialInfo(
-            provider="local",
-            url=f"{material.url}#retimed",
-            duration=int(round(section.measured_s)),
+        RetimedClip(
+            material=MaterialInfo(
+                provider="local",
+                url=f"{material.url}#retimed",
+                duration=int(round(section.measured_s)),
+            ),
+            seconds=section.measured_s,
+            section_index=index,
+            shot_index=0,
         )
-        for material, section in zip(materials, narration.sections)
+        for index, (material, section) in enumerate(zip(materials, narration.sections))
     ]
 
 
