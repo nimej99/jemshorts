@@ -73,3 +73,51 @@ def test_page_reaches_template_step_with_brandkit(isolated_env):
     assert at.selectbox
     # AppTest 는 format_func 적용된 라벨을 options 로 보고한다
     assert at.selectbox[0].options == ["UI 테스트 (upbeat, hook/cta)"]
+
+
+def test_page_renders_v2_narration_panel(isolated_env, monkeypatch):
+    """v2 플랜 조회 시 실측 타임라인 패널(테이블+요약)이 예외 없이 그려진다."""
+    conn = promo_db.connect()
+    try:
+        brandkit_store.save(conn, BrandKit(business_name="우리가게", photos=["b.mp4"]))
+    finally:
+        conn.close()
+
+    canned_plan = {
+        "plan_id": "v2-plan",
+        "template_id": "ui-test-v1",
+        "subject": "우리가게",
+        "materials": ["a.mp4", "b.mp4", "c.mp4"],
+        "used_brand_count": 1,
+        "photo_warning": False,
+        "structural_gate": {"passed": True, "failures": [], "warnings": []},
+        "approved_ready": True,
+        "template_version": 2,
+        "style_preset": "warm-food",
+        "narration": {
+            "total_s": 11.0,
+            "sections": [
+                {"role": "hook", "text": "훅", "target_s": 3.0, "measured_s": 3.0,
+                 "drift_s": 0.0, "start_s": 0.0, "end_s": 3.0},
+                {"role": "cta", "text": "행동 유도", "target_s": 8.0, "measured_s": 8.0,
+                 "drift_s": 0.0, "start_s": 3.0, "end_s": 11.0},
+            ],
+        },
+        "timeline_gate": {"passed": True, "failures": [], "warnings": []},
+        "clip_seconds": [1.5, 1.5, 8.0],
+        "headlines": ["우리가게 신메뉴", None],
+        "status": "planned",
+        "task_id": None,
+    }
+    monkeypatch.setattr(promo_api, "get_plan", lambda plan_id: canned_plan)
+
+    at = AppTest.from_file(PAGE_PATH, default_timeout=15)
+    at.session_state["promo_plan_id"] = "v2-plan"
+    at.run()
+
+    assert not at.exception
+    # 버전 배지가 서브헤더에 붙고, 실측 타임라인 요약/테이블이 그려진다.
+    assert any("템플릿 v2" in s.value for s in at.subheader)
+    assert any("실측 총 길이 11초" in c.value for c in at.caption)
+    assert any("클립 3개" in c.value for c in at.caption)
+    assert at.dataframe  # 섹션별 목표/실측/편차 테이블

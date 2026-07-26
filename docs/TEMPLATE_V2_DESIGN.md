@@ -241,6 +241,16 @@ fps/width 커스텀(코어 고정 1080x1920), narration_refs 간접 참조(우�
     (브랜드 소재가 모자랄 때 ComfyUI 등에 그대로 붙여넣는 용도).
   - style_preset 없는 템플릿은 400 — 스타일 없이 생성하면 컷마다 톤이 어긋나므로
     기본값으로 얼버무리지 않는다.
+- **제품화 완료** — 기능이 실제로 도는 경로에 올렸다.
+  - `templates-data/upbeat-new-menu-v2.json` 번들 시드: shots/headline/timing/
+    voice/style_preset/feel 을 전부 실제로 쓴다. 스케줄러 로테이션이 이 시드를
+    고르면 새 경로가 그대로 돈다. v1 시드 3종은 하위호환 회귀 기준으로 유지.
+  - 플랜 요약(`_plan_summary`)이 v2 필드를 노출: `template_version`,
+    `style_preset`, `narration`(섹션별 목표/실측/편차/구간 + 총 길이),
+    `timeline_gate`, `clip_seconds`, `headlines`.
+  - 승인 UI(`webui/pages/promo.py`)가 실측 타임라인 테이블 + 타임라인 게이트 +
+    컷 수 + 헤드라인을 렌더 전에 보여준다 — "승인한 것 = 렌더되는 것"을
+    승인자가 눈으로 확인하는 지점.
 
 ## 7. 오픈소스 채택 결정과의 관계
 

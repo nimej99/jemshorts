@@ -33,6 +33,38 @@ def _detail(exc: HTTPException) -> str:
     return str(exc.detail)
 
 
+def _render_narration_panel(narration: dict, timeline_gate: dict, plan: dict) -> None:
+    """템플릿 v2 실측 타임라인을 승인 게이트에 표시한다.
+
+    TTS 실측이 섹션 경계를 결정하므로, 승인자는 여기서 "이 스크립트가 이
+    템플릿 길이에 맞는지"와 컷/헤드라인 배치를 렌더 전에 확인한다.
+    """
+    st.markdown("**내레이션 실측 타임라인** (TTS 실측이 섹션 경계를 결정)")
+    for failure in timeline_gate["failures"]:
+        st.error(f"타임라인 게이트: {failure}")
+    for warning in timeline_gate["warnings"]:
+        st.warning(f"타임라인 게이트: {warning}")
+
+    headlines = plan.get("headlines") or []
+    rows = []
+    for index, section in enumerate(narration["sections"]):
+        headline = headlines[index] if index < len(headlines) else None
+        rows.append(
+            {
+                "섹션": section["role"],
+                "헤드라인": headline or "—",
+                "목표(초)": f"{section['target_s']:g}",
+                "실측(초)": f"{section['measured_s']:g}",
+                "편차(초)": f"{section['drift_s']:+g}",
+                "구간(초)": f"{section['start_s']:g}–{section['end_s']:g}",
+            }
+        )
+    st.dataframe(rows, use_container_width=True, hide_index=True)
+    clips = plan.get("clip_seconds") or []
+    st.caption(
+        f"실측 총 길이 {narration['total_s']:g}초 · 클립 {len(clips)}개 (컷 분할 포함)"
+    )
+
 # ── 1. 브랜드킷 ──────────────────────────────────────────────────────
 st.header("1. 브랜드킷")
 conn = promo_db.connect()
@@ -213,17 +245,36 @@ if plan_id:
         st.error(_detail(exc))
         st.stop()
 
-    st.subheader(f"플랜 {plan['plan_id']} — {plan['status']}")
-    col_a, col_b, col_c = st.columns(3)
-    col_a.metric("브랜드 소재", plan["used_brand_count"])
-    col_b.metric("소재 수", len(plan["materials"]))
-    col_c.metric(
+    version = plan.get("template_version", 1)
+    title = f"플랜 {plan['plan_id']} — {plan['status']}"
+    if version >= 2:
+        title += f"  ·  템플릿 v{version}"
+        if plan.get("style_preset"):
+            title += f" ({plan['style_preset']})"
+    st.subheader(title)
+
+    narration = plan.get("narration")
+    timeline_gate = plan.get("timeline_gate")
+
+    metric_cols = st.columns(4 if narration else 3)
+    metric_cols[0].metric("브랜드 소재", plan["used_brand_count"])
+    metric_cols[1].metric("소재 수", len(plan["materials"]))
+    metric_cols[2].metric(
         "구조 게이트", "통과" if plan["structural_gate"]["passed"] else "실패"
     )
+    if narration:
+        metric_cols[3].metric(
+            "타임라인 게이트", "통과" if timeline_gate["passed"] else "실패"
+        )
+
     if plan["photo_warning"]:
         st.warning("브랜드 소재 부족 — 스톡/대체 소재 비중이 높습니다")
     for failure in plan["structural_gate"]["failures"]:
         st.error(f"구조 게이트: {failure}")
+
+    if narration:
+        _render_narration_panel(narration, timeline_gate, plan)
+
     st.caption("소재 배치: " + " → ".join(plan["materials"]))
 
     # ── 5. 렌더 ──────────────────────────────────────────────────────

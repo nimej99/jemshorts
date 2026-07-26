@@ -34,6 +34,7 @@ SEED_IDS = {
     "upbeat-new-menu-v1",
     "calm-space-mood-v1",
     "energetic-event-sale-v1",
+    "upbeat-new-menu-v2",
 }
 
 
@@ -92,10 +93,10 @@ def _with_durations(*durations_and_roles) -> dict:
 
 
 def test_bundled_seed_templates_all_pass_load_all():
-    """번들 시드 3개가 전부 load_all 검증을 통과한다."""
+    """번들 시드 4개가 전부 load_all 검증을 통과한다."""
     templates = load_all(BUNDLED_DIR)
 
-    assert len(templates) == 3
+    assert len(templates) == 4
     assert {t.template_id for t in templates} == SEED_IDS
     assert {t.mood for t in templates} == {"upbeat", "calm", "energetic"}
     for template in templates:
@@ -367,9 +368,33 @@ def test_v2_template_roundtrips_through_load_template(tmp_path):
     assert template.structure[0].shots[1].crop == "center-zoom"
 
 
-def test_bundled_seeds_are_all_version_1():
-    """번들 시드는 v1 유지 — v2 도입이 기존 로테이션 동작을 바꾸지 않는다."""
-    assert {t.version for t in load_all(BUNDLED_DIR)} == {1}
+def test_bundled_seed_versions():
+    """v1 시드 3종은 하위호환 회귀 기준, v2 시드 1종은 신규 기능 시연용."""
+    versions = {t.template_id: t.version for t in load_all(BUNDLED_DIR)}
+
+    assert versions == {
+        "upbeat-new-menu-v1": 1,
+        "calm-space-mood-v1": 1,
+        "energetic-event-sale-v1": 1,
+        "upbeat-new-menu-v2": 2,
+    }
+
+
+def test_v2_seed_exercises_full_feature_set():
+    """v2 시드는 라벨만 v2 가 아니라 shots/headline/timing/style_preset 을 실제로 쓴다.
+
+    번들 시드가 기능을 실제로 사용해야 스케줄러 로테이션에서 새 경로가 돈다.
+    """
+    template = load_template(BUNDLED_DIR / "upbeat-new-menu-v2.json")
+
+    assert template.style_preset == "warm-food"
+    assert template.timing is not None and template.timing.owner == "narration"
+    assert template.voice is not None
+
+    hook = template.structure[0]
+    assert [shot.kind for shot in hook.shots] == ["wide", "cutin"]
+    assert hook.headline is not None and hook.headline.show is True
+    assert hook.feel
 
 
 @pytest.mark.parametrize(

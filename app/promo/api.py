@@ -121,7 +121,26 @@ def _gate_dict(gate) -> dict:
     }
 
 
-def _plan_summary(plan: pipeline.RenderPlan) -> dict:
+def _narration_dict(narration) -> dict:
+    """실측 타임라인을 UI 가 그대로 그릴 수 있는 형태로 변환한다."""
+    return {
+        "total_s": narration.total_s,
+        "sections": [
+            {
+                "role": section.role,
+                "text": section.text,
+                "target_s": section.target_s,
+                "measured_s": section.measured_s,
+                "drift_s": section.drift_s,
+                "start_s": section.start_s,
+                "end_s": section.end_s,
+            }
+            for section in narration.sections
+        ],
+    }
+
+
+def _plan_summary(plan: pipeline.RenderPlan, headlines: list[str | None] | None = None) -> dict:
     return {
         "plan_id": plan.plan_id,
         "template_id": plan.template.template_id,
@@ -131,7 +150,26 @@ def _plan_summary(plan: pipeline.RenderPlan) -> dict:
         "photo_warning": plan.photo_warning,
         "structural_gate": _gate_dict(plan.structural),
         "approved_ready": plan.approved_ready,
+        # --- 템플릿 v2 ---
+        "template_version": plan.template.version,
+        "style_preset": plan.template.style_preset,
+        "narration": _narration_dict(plan.narration) if plan.narration else None,
+        "timeline_gate": _gate_dict(plan.timeline) if plan.timeline else None,
+        "clip_seconds": [round(s, 3) for s in plan.clip_seconds],
+        "headlines": headlines,
     }
+
+
+def _headlines_for(plan: pipeline.RenderPlan) -> list[str | None] | None:
+    """플랜 템플릿의 섹션별 헤드라인 문구를 브랜드킷으로 채운다 (best-effort).
+
+    브랜드킷이 사라진 뒤에도 플랜 조회는 가능해야 하므로 실패하면 None.
+    """
+    try:
+        kit = _load_brandkit()
+    except HTTPException:
+        return None
+    return pipeline.headline_texts(plan.template, kit)
 
 
 @router.get("/templates")
@@ -179,7 +217,7 @@ def create_plan(body: PlanCreateRequest):
         plans.save_plan(conn, plan, raw)
     finally:
         conn.close()
-    return _plan_summary(plan)
+    return _plan_summary(plan, headlines=pipeline.headline_texts(template, kit))
 
 
 def _run_render(plan_id: str, task_id: str) -> None:
@@ -249,7 +287,7 @@ def get_plan(plan_id: str):
         raise HTTPException(status_code=404, detail=f"플랜이 없습니다: {plan_id}")
 
     plan = plans.restore_plan(row)
-    response = _plan_summary(plan)
+    response = _plan_summary(plan, headlines=_headlines_for(plan))
     response["status"] = row["status"]
     response["task_id"] = row["task_id"]
     if row["result_json"]:
