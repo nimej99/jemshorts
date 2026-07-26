@@ -177,13 +177,30 @@ fps/width 커스텀(코어 고정 1080x1920), narration_refs 간접 참조(우�
     `approved_ready = False` — **렌더 비용을 쓰기 전에** 길이 불일치를 잡는다.
   - 실측값과 게이트 판정은 payload 에 영속화한다 (재측정 편차로 승인 결과가
     뒤집히면 안 된다). 구버전 payload 는 키 없이도 복원된다.
-- (b-2) 실측 경계를 렌더에 반영: 섹션별 소재를 실측 길이로 잘라내고
-  `video_clip_duration` 을 그에 맞춘다. 오디오 재생성을 피하려면 코어
-  `start(..., voice_preview={script, voice_name, voice_rate, voice_volume,
-  audio_file, duration, sub_maker})` 재사용 경로를 쓴다 — `audio_file` 이
-  `utils.task_dir(task_id)` 안이고 `voice_volume == 1.0` 일 때만 채택된다
-  (`app/services/task.py:_resolve_reusable_voice_preview`). 이 경로면 sub_maker
-  가 함께 전달돼 자막도 그대로 생성된다.
+- **(b-2) 완료** — 실측 경계를 화면에 반영 (`app/promo/materials/retime.py`).
+  - 섹션 소재를 실측 길이 클립으로 다시 만든다: 사진은 그 길이만큼 정지
+    클립으로 렌더, 영상은 길면 자르고 짧으면 루프해서 채운다(무음 `-an`).
+  - `RenderPlan.clip_duration_s` = 가장 긴 섹션 + 꼬리 여유 올림 →
+    `VideoParams.video_clip_duration`. 소재가 이미 섹션 길이이고 이 값이
+    그보다 크거나 같으면 코어가 클립을 더 쪼개지 않는다.
+  - **코어 실측 검증** (색상 구분 클립 3개 + 15초 무음 오디오로
+    `combine_videos` 직접 호출, 프레임 YUV 샘플링):
+    hook(0~3s) red / body(3~11s) green / cta(11~15s) blue — 화면 전환이
+    섹션 경계와 정확히 일치.
+  - 같은 검증에서 **아티팩트를 하나 잡았다**: 코어는 `오디오 + 0.1초`
+    (`_VIDEO_DURATION_SAFETY_MARGIN`) 만큼의 영상을 요구하고 모자라면 앞
+    클립부터 재사용한다 → 끝에서 훅 화면이 66ms 번쩍였다. 마지막 섹션
+    클립에만 꼬리 여유(기본 1.0초)를 붙여 제거했고(재검증: `concatenating
+    3 clips`, 루프 경고 없음), 코어 상수가 바뀌면 깨지는 가드 테스트를 뒀다.
+  - 리타이밍은 플랜 시점에 수행한다 — 승인 화면에 제시된 소재 = 실제
+    렌더되는 소재. 소재 길이는 payload 에 함께 저장한다(구버전
+    `material_urls` payload 도 계속 복원).
+- (b-3) 오디오 재생성 회피: 코어 `start(..., voice_preview={script, voice_name,
+  voice_rate, voice_volume, audio_file, duration, sub_maker})` 재사용 경로 —
+  `audio_file` 이 `utils.task_dir(task_id)` 안이고 `voice_volume == 1.0` 일 때만
+  채택된다 (`app/services/task.py:_resolve_reusable_voice_preview`). 이 경로면
+  sub_maker 가 함께 전달돼 자막도 그대로 생성된다. 현재는 실측 TTS 와 렌더
+  TTS 가 각각 호출된다(edge-tts 무료 경로 기준 허용).
 - (c) 컷인 shots: 동일 소재 crop/zoom 파생 클립 생성 (ffmpeg crop+scale)
 - (d) headline 오버레이: moviepy TextClip 레이어 (코어 자막과 독립)
 - (e) style_preset → 소재 생성 프롬프트 (ComfyUI/외부 API 연동 시)
