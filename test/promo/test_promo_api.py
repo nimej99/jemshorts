@@ -11,6 +11,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from app.models.schema import MaterialInfo
 from app.promo import api as promo_api
 from app.promo import db as promo_db
 from app.promo import pipeline, plans
@@ -654,3 +655,127 @@ def test_material_prompts_unknown_template_404(client):
     )
 
     assert response.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# 템플릿 v2: 플랜 요약이 실측 타임라인/컷/헤드라인을 노출하는가
+# ---------------------------------------------------------------------------
+
+V2_TEMPLATE_DATA = {
+    "template_id": "api-test-v2",
+    "name": "API v2 테스트",
+    "version": 2,
+    "mood": "upbeat",
+    "style_preset": "warm-food",
+    "timing": {"owner": "narration", "tolerance_s": 0.2},
+    "structure": [
+        {
+            "role": "hook",
+            "duration_s": 3,
+            "script_guide": "훅",
+            "material_slot": "any",
+            "headline": {"template": "{shop_name} 신메뉴", "show": True},
+            "shots": [{"kind": "wide"}, {"kind": "cutin"}],
+        },
+        {
+            "role": "cta",
+            "duration_s": 8,
+            "script_guide": "행동 유도",
+            "material_slot": "photo",
+        },
+    ],
+    "total_duration_range": [10, 15],
+    "caption_template": "{shop_name}",
+    "hashtags_base": ["테스트"],
+}
+
+
+def _fake_narrate(script, template, *, voice_name, voice_rate=1.0, audio_dir, synthesize=None):
+    from app.promo.timing import NarrationAudio, NarrationTiming, SectionTiming
+
+    narration = NarrationTiming(
+        sections=(
+            SectionTiming(role="hook", text="훅 문장", target_s=3.0, measured_s=3.0, start_s=0.0),
+            SectionTiming(role="cta", text="행동 유도 문장", target_s=8.0, measured_s=8.0, start_s=3.0),
+        )
+    )
+    audio = NarrationAudio(
+        audio_file=str(audio_dir) + "/fake.mp3",
+        duration_s=11.0,
+        sub_maker=object(),
+        voice_name=voice_name,
+        voice_rate=voice_rate,
+    )
+    return narration, audio
+
+
+def _fake_retime(materials, narration, storage_local_dir, *, shots=None, headlines=None, font_path=None, retime_id=None, tail_padding_s=1.0):
+    from app.promo.materials.retime import RetimedClip
+
+    clips = []
+    position = 0
+    for index, section in enumerate(narration.sections):
+        section_shots = list(shots[index]) if shots else []
+        count = len(section_shots) or 1
+        share = section.measured_s / count
+        for shot_index in range(count):
+            clips.append(
+                RetimedClip(
+                    material=MaterialInfo(
+                        provider="local",
+                        url=f"/tmp/fake-retimed-{position}.mp4",
+                        duration=int(round(share)),
+                    ),
+                    seconds=round(share, 3),
+                    section_index=index,
+                    shot_index=shot_index,
+                )
+            )
+            position += 1
+    return clips
+
+
+def test_v2_plan_summary_exposes_timeline_clips_headlines(client, monkeypatch, tmp_path):
+    (tmp_path / "templates-data" / "api-test-v2.json").write_text(
+        json.dumps(V2_TEMPLATE_DATA, ensure_ascii=False), encoding="utf-8"
+    )
+    monkeypatch.setattr(pipeline, "narrate_full_script", _fake_narrate)
+    monkeypatch.setattr(pipeline, "retime_materials", _fake_retime)
+
+    response = client.post(
+        "/api/v1/promo/plans",
+        json={"template_id": "api-test-v2", "script": "훅 문장. 행동 유도 문장."},
+    )
+    assert response.status_code == 200, response.text
+    plan = response.json()
+
+    assert plan["template_version"] == 2
+    assert plan["style_preset"] == "warm-food"
+    # 실측 타임라인: 총 11초, 섹션 2개
+    assert plan["narration"]["total_s"] == 11.0
+    assert [s["role"] for s in plan["narration"]["sections"]] == ["hook", "cta"]
+    assert plan["narration"]["sections"][0]["end_s"] == 3.0
+    # 타임라인 게이트 통과 + 컷 분할(hook 2컷) 반영
+    assert plan["timeline_gate"]["passed"] is True
+    assert plan["clip_seconds"] == [1.5, 1.5, 8.0]
+    assert len(plan["materials"]) == 3
+    # 헤드라인은 브랜드킷으로 채워진다 (cta 는 선언 없음 -> None)
+    assert plan["headlines"] == ["우리가게 신메뉴", None]
+    assert plan["approved_ready"] is True
+
+    # 조회 시에도 복원된 플랜에서 같은 v2 필드가 나온다 (영속화 왕복).
+    fetched = client.get(f"/api/v1/promo/plans/{plan['plan_id']}").json()
+    assert fetched["narration"]["total_s"] == 11.0
+    assert fetched["clip_seconds"] == [1.5, 1.5, 8.0]
+    assert fetched["timeline_gate"]["passed"] is True
+    assert fetched["headlines"] == ["우리가게 신메뉴", None]
+
+
+def test_v1_plan_summary_has_no_narration(client):
+    """v1 플랜은 narration/timeline 이 None — 기존 계약 불변."""
+    plan = _create_plan(client)
+
+    assert plan["template_version"] == 1
+    assert plan["narration"] is None
+    assert plan["timeline_gate"] is None
+    assert plan["clip_seconds"] == []
