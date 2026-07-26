@@ -85,3 +85,49 @@ def test_prompt_with_trend_keywords(template, kit):
 
 def test_prompt_without_trend_keywords_has_no_trend_block(template, kit):
     assert "[트렌드]" not in build_script_prompt(template, kit)
+
+
+# --- 템플릿 v2 선택 필드 반영 -------------------------------------------------
+
+
+def _v2_template(*, hook_fields: dict | None = None, **overrides):
+    """version 2 템플릿 — hook 섹션에만 v2 필드를 얹을 수 있다."""
+    data = {**TEMPLATE_DATA, "version": 2}
+    data["structure"] = [dict(section) for section in TEMPLATE_DATA["structure"]]
+    if hook_fields:
+        data["structure"][0].update(hook_fields)
+    data.update(overrides)
+    return validate_template(data)
+
+
+def test_char_budget_scales_with_template_voice_speed():
+    """낭독이 빠르면 같은 길이에 더 많은 글자가 들어간다 (20초 * 4.5 * 1.2 = 108)."""
+    template = _v2_template(voice={"speed": 1.2})
+
+    assert char_budget(template, DEFAULT_CHARS_PER_SEC) == 108
+
+
+def test_prompt_includes_section_feel_and_headline(kit):
+    template = _v2_template(
+        hook_fields={
+            "feel": "설레는",
+            "headline": {"template": "신메뉴 출시!", "show": True},
+        }
+    )
+
+    prompt = build_script_prompt(template, kit)
+
+    assert "1. hook (3초): 시선을 붙잡으세요 [톤: 설레는]" in prompt
+    assert '화면 헤드라인: "신메뉴 출시!"' in prompt
+    assert "그대로 반복하지 마세요" in prompt
+
+
+def test_hidden_headline_is_not_prompted(kit):
+    template = _v2_template(
+        hook_fields={"headline": {"template": "숨김 배너", "show": False}}
+    )
+
+    prompt = build_script_prompt(template, kit)
+
+    assert "숨김 배너" not in prompt
+    assert "화면 헤드라인" not in prompt

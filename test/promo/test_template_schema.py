@@ -14,8 +14,16 @@ import pytest
 
 from app.promo.templates import curated_fetch
 from app.promo.templates.schema import (
+    DEFAULT_TIMING_TOLERANCE_S,
+    MAX_SHOTS_PER_SECTION,
+    MAX_TEMPLATE_VERSION,
+    Headline,
+    Shot,
     TemplateValidationError,
+    TimingSpec,
+    VoiceSpec,
     load_all,
+    load_template,
     validate_template,
 )
 
@@ -269,3 +277,215 @@ def test_remote_fetch_skips_invalid_template(tmp_path, monkeypatch, caplog):
     # 유효 템플릿만 캐시에 저장된다.
     assert (cache / "good.json").exists()
     assert not (cache / "bad.json").exists()
+
+
+# ---------------------------------------------------------------------------
+# (d) v2 선택 필드 (docs/TEMPLATE_V2_DESIGN.md §4) — v1 완전 하위호환
+# ---------------------------------------------------------------------------
+
+
+def _v2_template(**overrides) -> dict:
+    """v2 선택 필드를 모두 채운 템플릿 dict."""
+    data = _valid_template(version=2)
+    data["style_preset"] = "clean-product"
+    data["voice"] = {"speed": 1.1}
+    data["timing"] = {"owner": "narration", "tolerance_s": 0.2}
+    data["structure"][0]["headline"] = {"template": "{menu_name} 출시!", "show": True}
+    data["structure"][0]["shots"] = [
+        {"kind": "wide", "motion": "push-in"},
+        {"kind": "cutin", "motion": "drift", "crop": "center-zoom"},
+    ]
+    data["structure"][0]["feel"] = "따뜻한, 식욕을 돋우는"
+    data.update(overrides)
+    return data
+
+
+def _v2_section(**section_fields) -> dict:
+    """hook 섹션에만 v2 필드를 얹은 version 2 템플릿."""
+    data = _valid_template(version=2)
+    data["structure"][0].update(section_fields)
+    return data
+
+
+def test_v1_template_keeps_v2_fields_empty():
+    """version 1 문서는 무수정 통과하고 v2 필드는 전부 기본값(미지정)이다."""
+    template = validate_template(_valid_template())
+
+    assert template.version == 1
+    assert template.style_preset is None
+    assert template.voice is None
+    assert template.timing is None
+    assert all(
+        section.headline is None and section.shots == () and section.feel is None
+        for section in template.structure
+    )
+
+
+def test_v2_full_template_parsed():
+    """v2 전 필드가 dataclass 로 파싱된다."""
+    template = validate_template(_v2_template())
+
+    assert template.version == 2
+    assert template.style_preset == "clean-product"
+    assert template.voice == VoiceSpec(speed=1.1)
+    assert template.timing == TimingSpec(owner="narration", tolerance_s=0.2)
+
+    hook = template.structure[0]
+    assert hook.headline == Headline(template="{menu_name} 출시!", show=True)
+    assert hook.shots == (
+        Shot(kind="wide", motion="push-in"),
+        Shot(kind="cutin", motion="drift", crop="center-zoom"),
+    )
+    assert hook.feel == "따뜻한, 식욕을 돋우는"
+    # v2 필드는 v1 계약(총 길이/역할 순서)을 바꾸지 않는다.
+    assert template.total_duration_s == 20
+    assert [s.role for s in template.structure] == ["hook", "body", "cta"]
+
+
+def test_v2_defaults_applied_when_subfields_omitted():
+    """voice.speed / timing.tolerance_s / headline.show 는 기본값을 갖는다."""
+    data = _valid_template(version=2)
+    data["voice"] = {}
+    data["timing"] = {"owner": "template"}
+    data["structure"][0]["headline"] = {"template": "제목"}
+
+    template = validate_template(data)
+
+    assert template.voice.speed == 1.0
+    assert template.timing.tolerance_s == DEFAULT_TIMING_TOLERANCE_S
+    assert template.structure[0].headline.show is True
+
+
+def test_v2_template_roundtrips_through_load_template(tmp_path):
+    """v2 JSON 파일이 로더를 그대로 통과한다."""
+    path = tmp_path / "v2.json"
+    path.write_text(json.dumps(_v2_template(), ensure_ascii=False), encoding="utf-8")
+
+    template = load_template(path)
+
+    assert template.timing.owner == "narration"
+    assert template.structure[0].shots[1].crop == "center-zoom"
+
+
+def test_bundled_seeds_are_all_version_1():
+    """번들 시드는 v1 유지 — v2 도입이 기존 로테이션 동작을 바꾸지 않는다."""
+    assert {t.version for t in load_all(BUNDLED_DIR)} == {1}
+
+
+@pytest.mark.parametrize(
+    "field, value",
+    [
+        ("style_preset", "clean-product"),
+        ("voice", {"speed": 1.0}),
+        ("timing", {"owner": "narration"}),
+    ],
+)
+def test_v2_top_level_field_in_v1_document_rejected(field, value):
+    """version 1 문서의 v2 필드는 조용히 무시하지 않고 거부한다."""
+    with pytest.raises(TemplateValidationError, match="version 2 이상"):
+        validate_template(_valid_template(**{field: value}))
+
+
+@pytest.mark.parametrize(
+    "field, value",
+    [
+        ("headline", {"template": "제목"}),
+        ("shots", [{"kind": "wide"}]),
+        ("feel", "따뜻한"),
+    ],
+)
+def test_v2_section_field_in_v1_document_rejected(field, value):
+    """섹션 단위 v2 필드도 version 1 문서에서는 거부된다 (위치 포함 메시지)."""
+    data = _valid_template()
+    data["structure"][0][field] = value
+
+    with pytest.raises(TemplateValidationError, match=rf"structure\[0\]\.{field}"):
+        validate_template(data)
+
+
+def test_version_above_max_rejected():
+    """미지원 상위 버전은 해석할 수 없으므로 거부한다."""
+    with pytest.raises(TemplateValidationError, match="version"):
+        validate_template(_valid_template(version=MAX_TEMPLATE_VERSION + 1))
+
+
+def test_shots_must_start_with_wide():
+    """컷인은 와이드샷 파생 — 첫 컷이 cutin 이면 거부."""
+    data = _v2_section(shots=[{"kind": "cutin"}, {"kind": "wide"}])
+
+    with pytest.raises(TemplateValidationError, match="'wide' 여야 합니다"):
+        validate_template(data)
+
+
+def test_shots_above_max_rejected():
+    """섹션당 컷 수 상한을 넘으면 거부한다."""
+    shots = [{"kind": "wide"}] + [{"kind": "cutin"}] * MAX_SHOTS_PER_SECTION
+    data = _v2_section(shots=shots)
+
+    with pytest.raises(TemplateValidationError, match="최대 4컷"):
+        validate_template(data)
+
+
+def test_empty_shots_rejected():
+    """shots 를 선언했으면 비어있을 수 없다."""
+    with pytest.raises(TemplateValidationError, match="비어있지 않은 배열"):
+        validate_template(_v2_section(shots=[]))
+
+
+@pytest.mark.parametrize(
+    "shot, expected",
+    [
+        ({"kind": "closeup"}, "kind"),
+        ({"kind": "wide", "motion": "zoom-bounce"}, "motion"),
+        ({"kind": "wide", "crop": "diagonal"}, "crop"),
+        ({"kind": "wide", "zoom": 2}, "알 수 없는 필드"),
+    ],
+)
+def test_invalid_shot_values_rejected(shot, expected):
+    """샷 어휘는 닫힌 집합 — 오타는 렌더 단계에서 조용히 사라지면 안 된다."""
+    with pytest.raises(TemplateValidationError, match=expected):
+        validate_template(_v2_section(shots=[shot]))
+
+
+@pytest.mark.parametrize("speed", [0.4, 2.1, "1.0", True])
+def test_voice_speed_out_of_range_rejected(speed):
+    with pytest.raises(TemplateValidationError, match="voice.speed"):
+        validate_template(_valid_template(version=2, voice={"speed": speed}))
+
+
+def test_voice_unknown_field_rejected():
+    with pytest.raises(TemplateValidationError, match="알 수 없는 필드가 있습니다: pitch"):
+        validate_template(_valid_template(version=2, voice={"pitch": 3}))
+
+
+def test_timing_owner_invalid_rejected():
+    with pytest.raises(TemplateValidationError, match="timing.owner"):
+        validate_template(_valid_template(version=2, timing={"owner": "assembler"}))
+
+
+@pytest.mark.parametrize("tolerance", [0, -0.1, 1.5])
+def test_timing_tolerance_out_of_range_rejected(tolerance):
+    data = _valid_template(
+        version=2, timing={"owner": "narration", "tolerance_s": tolerance}
+    )
+
+    with pytest.raises(TemplateValidationError, match="timing.tolerance_s"):
+        validate_template(data)
+
+
+@pytest.mark.parametrize(
+    "headline, expected",
+    [
+        ({"template": "  "}, "template"),
+        ({"template": "제목", "show": "yes"}, "show"),
+        ({"show": True}, "template"),
+    ],
+)
+def test_invalid_headline_rejected(headline, expected):
+    with pytest.raises(TemplateValidationError, match=expected):
+        validate_template(_v2_section(headline=headline))
+
+
+def test_empty_feel_rejected():
+    with pytest.raises(TemplateValidationError, match="feel"):
+        validate_template(_v2_section(feel="   "))

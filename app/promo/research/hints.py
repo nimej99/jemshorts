@@ -18,10 +18,15 @@ DEFAULT_CHARS_PER_SEC = 4.5
 
 
 def char_budget(template: Template, chars_per_sec: float) -> int:
-    """템플릿 총 길이와 페이싱으로 스크립트 글자수(공백 제외) 예산을 계산한다."""
+    """템플릿 총 길이와 페이싱으로 스크립트 글자수(공백 제외) 예산을 계산한다.
+
+    템플릿 v2 `voice.speed` 가 있으면 낭독 속도만큼 예산을 비례 조정한다
+    (같은 초 안에 더 빠르게 읽으면 더 많은 글자가 들어간다).
+    """
     if chars_per_sec <= 0:
         raise ValueError(f"chars_per_sec 는 0보다 커야 합니다: {chars_per_sec}")
-    return round(template.total_duration_s * chars_per_sec)
+    speed = template.voice.speed if template.voice else 1.0
+    return round(template.total_duration_s * chars_per_sec * speed)
 
 
 def build_script_prompt(
@@ -55,9 +60,18 @@ def build_script_prompt(
         f"[구성] 총 {template.total_duration_s:g}초, 섹션 순서대로:",
     ]
     for index, section in enumerate(template.structure, start=1):
-        lines.append(
+        line = (
             f"{index}. {section.role} ({section.duration_s:g}초): {section.script_guide}"
         )
+        if section.feel:
+            line += f" [톤: {section.feel}]"
+        lines.append(line)
+        headline = section.headline
+        if headline is not None and headline.show:
+            lines.append(
+                f'   화면 헤드라인: "{headline.template}" '
+                "— 같은 문구를 내레이션에서 그대로 반복하지 마세요."
+            )
     lines += [
         "",
         f"[분량] 공백 제외 약 {budget}자 (초당 {pacing:g}자 낭독 기준). "
