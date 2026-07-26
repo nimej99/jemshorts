@@ -177,19 +177,128 @@ def enrich_generic(url: str) -> EnrichResult:
     )
 
 
+# 네이버 플레이스 URL 에서 place id 추출 (/restaurant/{id}/, /place/{id}, /p/entry/place/{id})
+_NAVER_PLACE_ID_RE = re.compile(r"/(?:place|restaurant|cafe|hairshop|hospital|entry/place)/(\d+)")
+
+
+def scrapling_enabled() -> bool:
+    """Scrapling 보조 수집 활성 여부 (기본 비활성 — 약관 리스크는 운영 결정)."""
+    return bool(config.app.get("promo_scrapling_enabled", False))
+
+
+def naver_place_id(url: str) -> str | None:
+    match = _NAVER_PLACE_ID_RE.search(urllib.parse.urlparse(url).path)
+    return match.group(1) if match else None
+
+
+def parse_naver_place_html(html: str) -> dict:
+    """pcmap 페이지의 __APOLLO_STATE__ 에서 브랜드킷 필드 후보를 추출한다.
+
+    순수 함수 (오프라인 테스트 대상). PlaceDetailBase 엔트리가 없으면 빈 dict.
+    """
+    match = re.search(r"window\.__APOLLO_STATE__\s*=\s*", html)
+    if not match:
+        return {}
+    try:
+        data, _ = json.JSONDecoder().raw_decode(html[match.end():])
+    except ValueError:
+        return {}
+    for key, entry in data.items():
+        if not key.startswith("PlaceDetailBase") or not isinstance(entry, dict):
+            continue
+        fields: dict = {}
+        if entry.get("name"):
+            fields["business_name"] = str(entry["name"]).strip()
+        if entry.get("category"):
+            fields["category"] = str(entry["category"]).strip()
+        address = entry.get("roadAddress") or entry.get("address")
+        if address:
+            fields["address"] = str(address).strip()
+        phone = entry.get("phone") or entry.get("virtualPhone")
+        if phone:
+            fields["phone"] = str(phone).strip()
+        if entry.get("microReview"):
+            review = entry["microReview"]
+            if isinstance(review, list):
+                review = " ".join(str(item) for item in review if item)
+            if str(review).strip():
+                fields["description"] = str(review).strip()
+        if fields:
+            return fields
+    return {}
+
+
+def _fetch_rendered_html(url: str) -> str:
+    """Scrapling StealthyFetcher 로 JS/봇월 통과 후 HTML 을 가져온다.
+
+    선택 의존 — 미설치면 RuntimeError 로 안내한다 (조용한 빈 결과 금지).
+    설치: `uv pip install scrapling && scrapling install`
+    """
+    try:
+        from scrapling.fetchers import StealthyFetcher
+    except ImportError as exc:
+        raise RuntimeError(
+            "Scrapling 미설치: `uv pip install scrapling && scrapling install` "
+            "후 다시 시도하세요"
+        ) from exc
+
+    page = StealthyFetcher.fetch(url, headless=True, network_idle=True)
+    status = getattr(page, "status", None)
+    if status != 200:
+        raise RuntimeError(f"응답 상태 {status}")
+    return page.html_content
+
+
+def enrich_naver_place(url: str) -> EnrichResult:
+    """Scrapling 경유 네이버 플레이스 수집 (config 로 명시 활성화한 경우만).
+
+    실측 근거: 모바일 페이지는 클라이언트 렌더(빈 Apollo), pcmap 은 일반
+    HTTP 클라이언트에 429 — 실브라우저(StealthyFetcher)로 pcmap 을 연다.
+    """
+    place_id = naver_place_id(url)
+    if place_id is None:
+        return EnrichResult(
+            site=SITE_NAVER_PLACE,
+            status="failed",
+            warnings=[
+                "URL 에서 place id 를 찾지 못했습니다 "
+                "(지원: m.place.naver.com/*/{id}, map.naver.com/p/entry/place/{id}). "
+                "naver.me 단축링크는 원본 URL 로 바꿔 주세요."
+            ],
+        )
+    pcmap_url = f"https://pcmap.place.naver.com/place/{place_id}/home"
+    try:
+        html = _fetch_rendered_html(pcmap_url)
+    except RuntimeError as exc:
+        return EnrichResult(
+            site=SITE_NAVER_PLACE, status="failed", warnings=[f"수집 실패: {exc}"]
+        )
+    fields = parse_naver_place_html(html)
+    if not fields:
+        return EnrichResult(
+            site=SITE_NAVER_PLACE,
+            status="failed",
+            warnings=["렌더된 페이지에서 플레이스 정보를 찾지 못했습니다"],
+        )
+    return EnrichResult(site=SITE_NAVER_PLACE, status="ok", fields=fields)
+
+
 def enrich(url: str) -> EnrichResult:
     """URL 사이트를 감지해 맞는 수집기로 라우팅한다."""
     site = detect_site(url)
     if site == SITE_INSTAGRAM:
         return enrich_instagram(url)
     if site == SITE_NAVER_PLACE:
+        if scrapling_enabled():
+            return enrich_naver_place(url)
         return EnrichResult(
             site=SITE_NAVER_PLACE,
             status="failed",
             warnings=[
-                "네이버 플레이스 페이지는 봇 차단으로 직접 수집하지 않습니다. "
-                "네이버 지역검색(공식 API)을 사용하세요 — "
-                "POST /brandkit/naver-local (상호명 기반)"
+                "네이버 플레이스 페이지는 봇 차단으로 기본 수집하지 않습니다. "
+                "네이버 지역검색(공식 API, POST /brandkit/naver-local)을 쓰거나, "
+                "보조 수집을 켜려면 config `promo_scrapling_enabled = true` "
+                "(Scrapling 설치 필요, 약관 리스크는 운영 판단)"
             ],
         )
     return enrich_generic(url)

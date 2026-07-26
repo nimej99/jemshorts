@@ -285,6 +285,10 @@ promo_trends_stale_hours = 6
 # https://developers.naver.com 에서 무료 발급
 naver_client_id = ""
 naver_client_secret = ""
+# 네이버 플레이스 보조 수집 (Scrapling 실브라우저 — 기본 비활성).
+# 공식 지역검색 API 로 부족할 때만 켜세요 (약관 리스크는 운영 판단).
+# 설치: uv pip install scrapling && scrapling install
+promo_scrapling_enabled = false
 # 업로드 백엔드: "upload_post"(기본, upload-post.com) | "postiz"(셀프호스트)
 promo_publish_backend = "upload_post"
 # Postiz 셀프호스트 (AGPL — 별도 서비스 HTTP 호출, 코드 결합 없음)
