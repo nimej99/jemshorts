@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import re
 import uuid
+from html import unescape
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Sequence
@@ -92,11 +93,19 @@ def cues_from_sub_maker(sub_maker: object) -> list[tuple[float, float, str]]:
 
     edge-tts 7.x 의 `cues` 구조를 우선 쓰고, 코어의 다른 TTS 가 채우는 구형
     `offset/subs` 구조도 읽는다 (app/services/voice.py 와 같은 판별 기준).
+
+    edge-tts cue 는 단어/구 단위이고 `content` 가 XML 이스케이프돼 있다 —
+    글자수 비율로 경계를 끊으므로 `unescape` 로 실제 텍스트 길이를 쓴다
+    (app/services/voice.py:_build_subtitle_items_from_edge_cues 와 동일).
     """
     cues = getattr(sub_maker, "cues", None)
     if cues:
         return [
-            (cue.start.total_seconds(), cue.end.total_seconds(), str(cue.text))
+            (
+                cue.start.total_seconds(),
+                cue.end.total_seconds(),
+                unescape(str(getattr(cue, "content", ""))),
+            )
             for cue in cues
         ]
     offsets = getattr(sub_maker, "offset", None) or []

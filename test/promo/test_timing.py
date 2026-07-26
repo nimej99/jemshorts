@@ -198,7 +198,7 @@ class _FakeCue:
     def __init__(self, start: float, end: float, text: str):
         self.start = timedelta(seconds=start)
         self.end = timedelta(seconds=end)
-        self.text = text
+        self.content = text
 
 
 class _FakeSubMaker:
@@ -229,6 +229,20 @@ def test_cues_from_sub_maker_reads_modern_and_legacy(template):
 
     assert cues_from_sub_maker(modern)[0][:2] == (0.0, 2.6)
     assert cues_from_sub_maker(legacy) == [(0.0, 1.0, "가"), (1.0, 2.5, "나")]
+
+
+def test_cues_from_sub_maker_reads_content_and_unescapes():
+    """edge-tts 7.x cue 는 `.content`(XML 이스케이프) — `.text` 가 아니다.
+
+    실측 경계는 글자수 비율로 끊으므로 이스케이프를 풀어 실제 길이를 쓴다.
+    (e2e 가 잡아낸 회귀: cue.text 를 읽어 AttributeError)
+    """
+    cues = [_FakeCue(0.0, 1.0, "매운&amp;떡볶이"), _FakeCue(1.0, 2.0, "출시!")]
+
+    result = cues_from_sub_maker(_FakeSubMaker(cues))
+
+    assert result[0][2] == "매운&떡볶이"
+    assert result[1][2] == "출시!"
 
 
 def test_sections_from_cues_ends_exactly_at_audio_end(template):
