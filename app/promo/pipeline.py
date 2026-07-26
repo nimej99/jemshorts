@@ -184,6 +184,7 @@ def plan_render(
             narration,
             storage_local_dir,
             shots=[section.shots for section in template.structure],
+            headlines=headline_texts(template, brandkit),
             retime_id=plan_id,
         )
         materials = [clip.material for clip in clips]
@@ -206,6 +207,30 @@ def plan_render(
         clip_seconds=clip_seconds,
         timeline=timeline,
     )
+
+
+def headline_texts(template: Template, brandkit: BrandKit) -> list[str | None]:
+    """섹션별 헤드라인 문구를 브랜드 정보로 채운다 (show=false 면 None).
+
+    채우지 못한 플레이스홀더는 `{menu_name}` 처럼 원문이 남는다 — 운영자가
+    승인 화면에서 "무엇이 안 채워졌는지" 바로 본다 (조용한 빈칸 금지).
+    """
+    from app.promo.materials.headline import format_headline
+
+    context = {
+        "shop_name": brandkit.business_name,
+        "business_name": brandkit.business_name,
+        "category": brandkit.category or "",
+        "template_name": template.name,
+    }
+    texts: list[str | None] = []
+    for section in template.structure:
+        headline = section.headline
+        if headline is None or not headline.show:
+            texts.append(None)
+            continue
+        texts.append(format_headline(headline.template, context))
+    return texts
 
 
 def build_video_params(plan: RenderPlan, *, n_threads: int = 1) -> VideoParams:

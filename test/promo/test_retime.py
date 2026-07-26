@@ -27,6 +27,12 @@ pytestmark = pytest.mark.skipif(
 )
 
 _TOLERANCE_S = 0.15
+_FONT_PATH = str(
+    __import__("pathlib").Path(__file__).resolve().parents[2]
+    / "resource"
+    / "fonts"
+    / "NotoSansKR-Bold.otf"
+)
 
 
 def _make_video(path, seconds: float, color: str = "red") -> str:
@@ -315,3 +321,140 @@ def test_shots_count_mismatch_rejected(tmp_path):
 
     with pytest.raises(RetimeError, match="샷 선언"):
         retime_materials(materials, narration, local_dir, shots=[(), ()])
+
+
+# --- 템플릿 v2 headline: 배너 합성 ------------------------------------------
+
+
+def _band_signature(path: str, top: bool, at_s: float = 0.2) -> str:
+    """클립 프레임의 위/아래 절반을 각각 해시한다 (배너가 어디에 얹혔는지 판별)."""
+    import hashlib
+    import tempfile
+
+    from PIL import Image
+
+    with tempfile.TemporaryDirectory() as tmp:
+        png = f"{tmp}/frame.png"
+        subprocess.run(
+            [
+                "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+                "-ss", str(at_s), "-i", path, "-frames:v", "1", png,
+            ],
+            check=True,
+            capture_output=True,
+            timeout=60,
+        )
+        image = Image.open(png).convert("RGB")
+        width, height = image.size
+        box = (0, 0, width, height // 2) if top else (0, height // 2, width, height)
+        return hashlib.sha256(image.crop(box).tobytes()).hexdigest()
+
+
+def _headline_png(tmp_path, text="신메뉴 출시!") -> str:
+    from app.promo.materials.headline import render_headline_png
+
+    return render_headline_png(
+        text, 640, 360, tmp_path / "banner.png", font_path=_FONT_PATH
+    )
+
+
+def _band_mean_diff(path_a: str, path_b: str, top: bool, at_s: float = 0.2) -> float:
+    """두 클립 프레임의 위/아래 절반 평균 픽셀 차이 (0~255)."""
+    import tempfile
+
+    from PIL import Image, ImageChops, ImageStat
+
+    def _band(path, tmp, name):
+        png = f"{tmp}/{name}.png"
+        subprocess.run(
+            [
+                "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+                "-ss", str(at_s), "-i", path, "-frames:v", "1", png,
+            ],
+            check=True,
+            capture_output=True,
+            timeout=60,
+        )
+        image = Image.open(png).convert("RGB")
+        width, height = image.size
+        box = (0, 0, width, height // 2) if top else (0, height // 2, width, height)
+        return image.crop(box)
+
+    with tempfile.TemporaryDirectory() as tmp:
+        diff = ImageChops.difference(_band(path_a, tmp, "a"), _band(path_b, tmp, "b"))
+        return sum(ImageStat.Stat(diff).mean) / 3
+
+
+def test_headline_overlay_changes_only_top_half(tmp_path):
+    """배너는 상단만 바꾼다 — 하단(소재 본 화면)은 사실상 그대로여야 한다.
+
+    필터 그래프가 달라지면 인코딩 결과가 비트 단위로 같지 않으므로 평균
+    픽셀 차이로 본다 (상단은 확연히, 하단은 인코딩 오차 수준).
+    """
+    source = _pattern_video(tmp_path / "src.mp4", 3)
+    plain = str(tmp_path / "plain.mp4")
+    banner = str(tmp_path / "banner.mp4")
+
+    retime_material(source, 1.5, plain, shot=Shot(kind="wide"))
+    retime_material(
+        source, 1.5, banner, shot=Shot(kind="wide"), headline_png=_headline_png(tmp_path)
+    )
+
+    assert _band_mean_diff(banner, plain, top=True) > 5.0
+    assert _band_mean_diff(banner, plain, top=False) < 1.0
+
+
+def test_missing_headline_png_rejected(tmp_path):
+    source = _pattern_video(tmp_path / "src.mp4", 2)
+
+    with pytest.raises(RetimeError, match="헤드라인 배너 파일"):
+        retime_material(
+            source, 1.0, str(tmp_path / "out.mp4"), headline_png=str(tmp_path / "no.png")
+        )
+
+
+def test_headline_lands_on_first_shot_only(tmp_path):
+    """배너는 섹션 첫 컷에만 (컷인까지 깔면 시각 밀도가 무너진다)."""
+    local_dir = tmp_path / "local_videos"
+    local_dir.mkdir()
+    materials = [
+        MaterialInfo(provider="local", url=_pattern_video(tmp_path / "a.mp4", 6))
+    ]
+    narration = NarrationTiming(sections=(_section("hook", 4.0, 0.0),))
+    shots = [(Shot(kind="wide"), Shot(kind="cutin"))]
+
+    with_banner = retime_materials(
+        materials,
+        narration,
+        local_dir,
+        shots=shots,
+        headlines=["신메뉴 출시!"],
+        font_path=_FONT_PATH,
+        retime_id="h1",
+        tail_padding_s=0.5,
+    )
+    without = retime_materials(
+        materials,
+        narration,
+        local_dir,
+        shots=shots,
+        retime_id="h0",
+        tail_padding_s=0.5,
+    )
+
+    assert _band_signature(with_banner[0].material.url, top=True) != _band_signature(
+        without[0].material.url, top=True
+    )
+    assert _band_signature(with_banner[1].material.url, top=True) == _band_signature(
+        without[1].material.url, top=True
+    )
+
+
+def test_headline_count_mismatch_rejected(tmp_path):
+    local_dir = tmp_path / "local_videos"
+    local_dir.mkdir()
+    materials = [MaterialInfo(provider="local", url=_make_video(tmp_path / "a.mp4", 2))]
+    narration = NarrationTiming(sections=(_section("hook", 2.0, 0.0),))
+
+    with pytest.raises(RetimeError, match="헤드라인"):
+        retime_materials(materials, narration, local_dir, headlines=["a", "b"])

@@ -57,6 +57,9 @@ _DEFAULT_CUTIN_CROP = "center-zoom"
 _ZOOM_AMOUNT = 0.15  # push-in/pull-out 최대 확대율
 _PAN_WINDOW = 0.85  # 팬/드리프트에 쓰는 창 크기 비율
 
+# 헤드라인 배너 기본 폰트 (코어 번들 resource/fonts)
+DEFAULT_HEADLINE_FONT = "NotoSansKR-Bold.otf"
+
 _PHOTO_EXTS = frozenset(const.FILE_TYPE_IMAGES)
 _VIDEO_EXTS = frozenset(const.FILE_TYPE_VIDEOS)
 
@@ -254,11 +257,13 @@ def retime_material(
     output_path: str,
     *,
     shot: Shot | None = None,
+    headline_png: str | None = None,
 ) -> str:
     """소재 하나를 target_s 길이의 무음 클립으로 다시 만든다.
 
     `shot` 이 있으면 크롭/모션 필터를 적용한다 (같은 소재에서 와이드/컷인
     파생 클립을 만드는 경로 — docs/TEMPLATE_V2_DESIGN.md §6 (c)).
+    `headline_png` 가 있으면 그 위에 헤드라인 배너를 합성한다 (§6 (d)).
     """
     if target_s <= 0:
         raise RetimeError(f"목표 길이는 0보다 커야 합니다: {target_s}")
@@ -278,7 +283,19 @@ def retime_material(
         raise RetimeError(f"지원하지 않는 소재 형식입니다: {source_path}")
 
     shot_filter = build_shot_filter(shot, target_s, source_path)
-    if shot_filter:
+    if headline_png:
+        # 배너 합성은 크롭/모션 뒤에 온다 — 배너까지 확대·이동되면 안 된다.
+        if not os.path.isfile(headline_png):
+            raise RetimeError(f"헤드라인 배너 파일이 없습니다: {headline_png}")
+        args += ["-i", headline_png]
+        base = f"[0:v]{shot_filter}[shot];[shot]" if shot_filter else "[0:v]"
+        args += [
+            "-filter_complex",
+            f"{base}[1:v]overlay=x=0:y=0:format=auto[out]",
+            "-map",
+            "[out]",
+        ]
+    elif shot_filter:
         args += ["-vf", shot_filter]
     args += _encode_args(target_s, output_path)
 
@@ -288,12 +305,26 @@ def retime_material(
     return output_path
 
 
+def _render_section_headline(
+    text: str, source_path: str, output_png: str, font_path: str | None
+) -> str:
+    """소재 해상도에 맞춘 헤드라인 배너 PNG 를 만든다 (코어 폰트 지연 임포트)."""
+    from app.promo.materials.headline import render_headline_png
+    from app.utils import utils
+
+    width, height = probe_dimensions(source_path)
+    resolved_font = font_path or os.path.join(utils.font_dir(), DEFAULT_HEADLINE_FONT)
+    return render_headline_png(text, width, height, output_png, font_path=resolved_font)
+
+
 def retime_materials(
     materials: Sequence[MaterialInfo],
     narration: NarrationTiming,
     storage_local_dir: str | Path,
     *,
     shots: Sequence[Sequence[Shot]] | None = None,
+    headlines: Sequence[str | None] | None = None,
+    font_path: str | None = None,
     retime_id: str | None = None,
     tail_padding_s: float = DEFAULT_TAIL_PADDING_S,
 ) -> list[RetimedClip]:
@@ -306,6 +337,11 @@ def retime_materials(
     `shots` 가 있으면 섹션 하나가 여러 컷으로 쪼개진다 (템플릿 v2
     `section.shots`): 같은 소재에서 와이드/컷인 파생 클립을 만들고 섹션
     실측 길이를 컷 수만큼 균등 분배한다 — 소재 한 장으로도 컷 변화를 준다.
+
+    `headlines` 는 섹션별 헤드라인 문구(없으면 None)다. 배너는 **섹션의 첫
+    컷에만** 얹는다 (vox-director 의 `title: true/false` — 컷인까지 배너를
+    깔면 시각 밀도가 무너진다). `font_path` 미지정이면 코어 번들 한국어
+    폰트를 쓴다.
 
     마지막 컷에는 `tail_padding_s` 만큼 여유를 붙인다 (코어가 영상 부족분을
     앞 클립 재사용으로 채우는 것을 막는다 — 위 상수 주석 참고).
@@ -324,6 +360,11 @@ def retime_materials(
         raise RetimeError(
             f"샷 선언 {len(shots)}개와 실측 섹션 {len(narration.sections)}개가 "
             "일치하지 않습니다"
+        )
+    if headlines is not None and len(headlines) != len(narration.sections):
+        raise RetimeError(
+            f"헤드라인 {len(headlines)}개와 실측 섹션 "
+            f"{len(narration.sections)}개가 일치하지 않습니다"
         )
 
     local_dir_real = os.path.realpath(str(storage_local_dir))
@@ -349,7 +390,19 @@ def retime_materials(
             f"retimed-{retime_id}-{position:02d}-{role}-{shot_index}.mp4",
         )
         clip_s = seconds + (tail_padding_s if position == last else 0.0)
-        retime_material(material.url, clip_s, output_path, shot=shot)
+        headline_png = None
+        if headlines and shot_index == 0 and headlines[index]:
+            headline_png = _render_section_headline(
+                headlines[index],
+                material.url,
+                os.path.join(
+                    local_dir_real, f"headline-{retime_id}-{position:02d}.png"
+                ),
+                font_path,
+            )
+        retime_material(
+            material.url, clip_s, output_path, shot=shot, headline_png=headline_png
+        )
         logger.info(
             f"retime[{retime_id}] section[{index}] shot[{shot_index}] {role}: "
             f"{os.path.basename(material.url)} -> {clip_s:g}초"

@@ -212,7 +212,16 @@ fps/width 커스텀(코어 고정 1080x1920), narration_refs 간접 참조(우�
   - 와이드 정지컷은 필터를 아예 붙이지 않는다(불필요한 재인코딩 화질 손실 방지).
   - `RenderPlan.clip_seconds` 로 클립별 정확한 길이를 들고 다니며
     `clip_duration_s` 계산과 영속화에 쓴다.
-- (d) headline 오버레이: moviepy TextClip 레이어 (코어 자막과 독립)
+- **(d) 완료** — headline 오버레이 (`app/promo/materials/headline.py`).
+  - 코어 자막과 **독립 레이어**: 자막은 내레이션 받아쓰기, 헤드라인은 상단 고정 카피.
+  - `drawtext` 가 없는 ffmpeg 빌드가 있어(실측 확인) Pillow 로 배너 PNG 를 그리고
+    `overlay` 필터로 합성한다 — 폰트 지원이 ffmpeg 빌드에 의존하지 않는다.
+  - 배너는 **섹션 첫 컷에만** 얹는다 (vox `title: true/false`). 크롭/모션 뒤에
+    합성하므로 배너가 같이 확대·이동되지 않는다.
+  - 플레이스홀더는 브랜드킷 컨텍스트로 채우고, 못 채운 키는 `{menu_name}` 처럼
+    원문을 남긴다 — 빈칸으로 지우면 운영자가 누락을 못 본다.
+  - 긴 문구는 글자 단위로 최대 2줄까지 감싸고 말줄임을 남긴다(한국어는 공백이 적어
+    단어 단위 래핑이 안 맞는다).
 - (e) style_preset → 소재 생성 프롬프트 (ComfyUI/외부 API 연동 시)
 
 ## 7. 오픈소스 채택 결정과의 관계
