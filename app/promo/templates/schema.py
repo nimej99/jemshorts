@@ -4,7 +4,7 @@
 
 - template_id: 고유 식별자 (비어있지 않은 문자열)
 - name: 한국어 표시 이름
-- version: int >= 1
+- version: 1 | 2 (v2 선택 필드는 version >= 2 에서만 해석 — docs/TEMPLATE_V2_DESIGN.md)
 - mood: "upbeat" | "calm" | "energetic" (BGM 트랙 팩 mood 3종과 동일 — docs/TRACK_PACK.md)
 - structure: 순서 있는 섹션 배열. 각 섹션은
     role: "hook" | "body" | "cta"
@@ -15,13 +15,23 @@
 - caption_template: 캡션 템플릿 문자열
 - hashtags_base: 기본 해시태그 문자열 배열
 
+v2 선택 필드 (전부 optional — 없으면 v1 동작 그대로, 렌더러 무접촉):
+- style_preset: 소재 생성 프롬프트 프리셋 키
+- voice: {speed: 0.5~2.0}
+- timing: {owner: "narration" | "template", tolerance_s: 0 초과 1.0 이하}
+    narration = TTS 실측이 섹션 경계를 결정한다는 선언 (렌더러 반영은 후속 단계)
+- 섹션.headline: {template: 문자열, show: bool} — 헤드라인 배너 (코어 자막과 별개)
+- 섹션.shots: [{kind: "wide" | "cutin", motion?, crop?}] — 첫 컷은 wide, 최대 4컷
+- 섹션.feel: 감정/톤 힌트 문자열
+
 전역 가드레일 (위반 시 TemplateValidationError, 사유 포함):
 - 섹션 duration_s 합산이 10~60초 범위
 - hook 섹션 필수이며 첫 번째 섹션이어야 함
 - cta 섹션 필수
 - 섹션 개수 >= 2
 - mood 는 유효값 3종 중 하나
-- version 은 int >= 1
+- version 은 1~MAX_TEMPLATE_VERSION 정수 (미지원 상위 버전은 거부)
+- version 1 문서에 v2 필드가 있으면 거부 (조용히 무시하면 렌더 결과가 어긋난다)
 """
 
 from __future__ import annotations
@@ -43,9 +53,67 @@ MIN_TOTAL_DURATION_S = 10
 MAX_TOTAL_DURATION_S = 60
 MIN_SECTIONS = 2
 
+# 지원하는 최상위 스키마 버전. 상위 버전은 해석할 수 없으므로 거부한다.
+MAX_TEMPLATE_VERSION = 2
+
+# --- v2 선택 필드 어휘 (docs/TEMPLATE_V2_DESIGN.md §4) ---
+VALID_SHOT_KINDS = ("wide", "cutin")
+VALID_SHOT_MOTIONS = (
+    "static",
+    "push-in",
+    "pull-out",
+    "drift",
+    "pan-left",
+    "pan-right",
+)
+VALID_SHOT_CROPS = ("center-zoom", "top", "bottom", "left", "right")
+VALID_TIMING_OWNERS = ("narration", "template")
+
+MAX_SHOTS_PER_SECTION = 4
+MIN_VOICE_SPEED = 0.5
+MAX_VOICE_SPEED = 2.0
+DEFAULT_TIMING_TOLERANCE_S = 0.15
+MAX_TIMING_TOLERANCE_S = 1.0
+
+# version >= 2 에서만 허용되는 필드 목록
+V2_TEMPLATE_FIELDS = ("style_preset", "voice", "timing")
+V2_SECTION_FIELDS = ("headline", "shots", "feel")
+
 
 class TemplateValidationError(ValueError):
     """템플릿 스키마/가드레일 위반. 메시지에 위반 사유를 포함한다."""
+
+
+@dataclass(frozen=True)
+class Shot:
+    """섹션 안의 컷 하나 (v2). wide=와이드샷, cutin=같은 소재의 디테일 컷인."""
+
+    kind: str
+    motion: str | None = None
+    crop: str | None = None
+
+
+@dataclass(frozen=True)
+class Headline:
+    """섹션 헤드라인 배너 (v2). 코어 자막과 독립 레이어."""
+
+    template: str
+    show: bool = True
+
+
+@dataclass(frozen=True)
+class VoiceSpec:
+    """템플릿별 낭독 지시 (v2)."""
+
+    speed: float = 1.0
+
+
+@dataclass(frozen=True)
+class TimingSpec:
+    """타임라인 소유 선언 (v2). narration = TTS 실측이 섹션 경계를 결정."""
+
+    owner: str
+    tolerance_s: float = DEFAULT_TIMING_TOLERANCE_S
 
 
 @dataclass(frozen=True)
@@ -54,6 +122,11 @@ class Section:
     duration_s: float
     script_guide: str
     material_slot: str
+
+    # --- v2 선택 필드 (미지정이면 v1 동작) ---
+    headline: Headline | None = None
+    shots: tuple[Shot, ...] = ()
+    feel: str | None = None
 
 
 @dataclass(frozen=True)
@@ -66,6 +139,11 @@ class Template:
     total_duration_range: tuple[float, float]
     caption_template: str
     hashtags_base: tuple[str, ...]
+
+    # --- v2 선택 필드 (미지정이면 v1 동작) ---
+    style_preset: str | None = None
+    voice: VoiceSpec | None = None
+    timing: TimingSpec | None = None
 
     @property
     def total_duration_s(self) -> float:
@@ -88,7 +166,123 @@ def _is_number(value: object) -> bool:
     return isinstance(value, (int, float)) and not isinstance(value, bool)
 
 
-def _parse_section(raw: object, index: int, source: str) -> Section:
+def _require_object(
+    raw: object, where: str, source: str, allowed: tuple[str, ...]
+) -> dict:
+    """오브젝트 여부 + 허용 키만 있는지 검사한다 (오타를 조용히 무시하지 않는다)."""
+    if not isinstance(raw, dict):
+        raise _err(source, f"{where} 는 오브젝트여야 합니다")
+    unknown = sorted(set(raw) - set(allowed))
+    if unknown:
+        raise _err(
+            source,
+            f"{where} 에 알 수 없는 필드가 있습니다: {', '.join(unknown)} "
+            f"(허용: {', '.join(allowed)})",
+        )
+    return raw
+
+
+def _reject_v2_fields(
+    raw: dict, keys: tuple[str, ...], version: int, prefix: str, source: str
+) -> None:
+    """version 1 문서의 v2 필드를 거부한다 (무시하면 렌더 결과가 선언과 어긋난다)."""
+    if version >= 2:
+        return
+    present = [f"{prefix}{key}" for key in keys if key in raw]
+    if present:
+        raise _err(
+            source,
+            f"{', '.join(present)} 는 version 2 이상에서만 사용할 수 있습니다 "
+            f"(현재 version: {version})",
+        )
+
+
+def _parse_headline(raw: object, where: str, source: str) -> Headline:
+    data = _require_object(raw, where, source, ("template", "show"))
+    template = data.get("template")
+    if not isinstance(template, str) or not template.strip():
+        raise _err(source, f"{where}.template 는 비어있지 않은 문자열이어야 합니다")
+    show = data.get("show", True)
+    if not isinstance(show, bool):
+        raise _err(source, f"{where}.show 는 true/false 여야 합니다")
+    return Headline(template=template, show=show)
+
+
+def _parse_shots(raw: object, where: str, source: str) -> tuple[Shot, ...]:
+    if not isinstance(raw, list) or not raw:
+        raise _err(source, f"{where} 는 비어있지 않은 배열이어야 합니다")
+    if len(raw) > MAX_SHOTS_PER_SECTION:
+        raise _err(
+            source,
+            f"{where} 는 최대 {MAX_SHOTS_PER_SECTION}컷까지 허용합니다 "
+            f"(현재: {len(raw)}컷)",
+        )
+
+    shots: list[Shot] = []
+    for index, item in enumerate(raw):
+        at = f"{where}[{index}]"
+        data = _require_object(item, at, source, ("kind", "motion", "crop"))
+        kind = data.get("kind")
+        if kind not in VALID_SHOT_KINDS:
+            raise _err(
+                source,
+                f"{at}.kind '{kind}' 은 유효하지 않습니다 "
+                f"(허용: {', '.join(VALID_SHOT_KINDS)})",
+            )
+        motion = data.get("motion")
+        if motion is not None and motion not in VALID_SHOT_MOTIONS:
+            raise _err(
+                source,
+                f"{at}.motion '{motion}' 은 유효하지 않습니다 "
+                f"(허용: {', '.join(VALID_SHOT_MOTIONS)})",
+            )
+        crop = data.get("crop")
+        if crop is not None and crop not in VALID_SHOT_CROPS:
+            raise _err(
+                source,
+                f"{at}.crop '{crop}' 은 유효하지 않습니다 "
+                f"(허용: {', '.join(VALID_SHOT_CROPS)})",
+            )
+        shots.append(Shot(kind=kind, motion=motion, crop=crop))
+
+    # 컷인은 와이드샷의 디테일 파생 — 맥락 없이 먼저 나올 수 없다.
+    if shots[0].kind != "wide":
+        raise _err(source, f"{where}[0].kind 는 'wide' 여야 합니다 (컷인은 와이드 다음)")
+    return tuple(shots)
+
+
+def _parse_voice(raw: object, source: str) -> VoiceSpec:
+    data = _require_object(raw, "'voice'", source, ("speed",))
+    speed = data.get("speed", 1.0)
+    if not _is_number(speed) or not (MIN_VOICE_SPEED <= speed <= MAX_VOICE_SPEED):
+        raise _err(
+            source,
+            f"'voice.speed' 는 {MIN_VOICE_SPEED}~{MAX_VOICE_SPEED} 범위의 "
+            f"숫자여야 합니다 (현재: {speed!r})",
+        )
+    return VoiceSpec(speed=float(speed))
+
+
+def _parse_timing(raw: object, source: str) -> TimingSpec:
+    data = _require_object(raw, "'timing'", source, ("owner", "tolerance_s"))
+    owner = data.get("owner")
+    if owner not in VALID_TIMING_OWNERS:
+        raise _err(
+            source,
+            f"'timing.owner' '{owner}' 은 유효하지 않습니다 "
+            f"(허용: {', '.join(VALID_TIMING_OWNERS)})",
+        )
+    tolerance_s = data.get("tolerance_s", DEFAULT_TIMING_TOLERANCE_S)
+    if not _is_number(tolerance_s) or not (0 < tolerance_s <= MAX_TIMING_TOLERANCE_S):
+        raise _err(
+            source,
+            f"'timing.tolerance_s' 는 0 초과 {MAX_TIMING_TOLERANCE_S} 이하의 "
+            f"숫자여야 합니다 (현재: {tolerance_s!r})",
+        )
+    return TimingSpec(owner=owner, tolerance_s=float(tolerance_s))
+
+
+def _parse_section(raw: object, index: int, source: str, version: int = 1) -> Section:
     where = f"structure[{index}]"
     if not isinstance(raw, dict):
         raise _err(source, f"{where} 는 오브젝트여야 합니다")
@@ -116,11 +310,28 @@ def _parse_section(raw: object, index: int, source: str) -> Section:
             f"(허용: {', '.join(VALID_MATERIAL_SLOTS)})",
         )
 
+    _reject_v2_fields(raw, V2_SECTION_FIELDS, version, f"{where}.", source)
+
+    headline = (
+        _parse_headline(raw["headline"], f"{where}.headline", source)
+        if "headline" in raw
+        else None
+    )
+    shots = (
+        _parse_shots(raw["shots"], f"{where}.shots", source) if "shots" in raw else ()
+    )
+    feel = raw.get("feel")
+    if "feel" in raw and (not isinstance(feel, str) or not feel.strip()):
+        raise _err(source, f"{where}.feel 는 비어있지 않은 문자열이어야 합니다")
+
     return Section(
         role=role,
         duration_s=float(duration_s),
         script_guide=script_guide,
         material_slot=material_slot,
+        headline=headline,
+        shots=shots,
+        feel=feel,
     )
 
 
@@ -134,8 +345,23 @@ def validate_template(data: object, source: str = "<template>") -> Template:
     caption_template = _require_str(data, "caption_template", source)
 
     version = data.get("version")
-    if not isinstance(version, int) or isinstance(version, bool) or version < 1:
-        raise _err(source, f"'version' 은 1 이상의 정수여야 합니다 (현재: {version!r})")
+    if (
+        not isinstance(version, int)
+        or isinstance(version, bool)
+        or not (1 <= version <= MAX_TEMPLATE_VERSION)
+    ):
+        raise _err(
+            source,
+            f"'version' 은 1~{MAX_TEMPLATE_VERSION} 범위의 정수여야 합니다 "
+            f"(현재: {version!r})",
+        )
+    _reject_v2_fields(data, V2_TEMPLATE_FIELDS, version, "", source)
+
+    style_preset = (
+        _require_str(data, "style_preset", source) if "style_preset" in data else None
+    )
+    voice = _parse_voice(data["voice"], source) if "voice" in data else None
+    timing = _parse_timing(data["timing"], source) if "timing" in data else None
 
     mood = data.get("mood")
     if mood not in VALID_MOODS:
@@ -160,7 +386,8 @@ def validate_template(data: object, source: str = "<template>") -> Template:
             f"섹션은 최소 {MIN_SECTIONS}개 필요합니다 (현재: {len(structure_raw)}개)",
         )
     sections = tuple(
-        _parse_section(raw, index, source) for index, raw in enumerate(structure_raw)
+        _parse_section(raw, index, source, version)
+        for index, raw in enumerate(structure_raw)
     )
 
     roles = [section.role for section in sections]
@@ -209,6 +436,9 @@ def validate_template(data: object, source: str = "<template>") -> Template:
         total_duration_range=(lo, hi),
         caption_template=caption_template,
         hashtags_base=tuple(hashtags_raw),
+        style_preset=style_preset,
+        voice=voice,
+        timing=timing,
     )
 
 

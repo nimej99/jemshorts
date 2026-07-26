@@ -63,6 +63,15 @@ class RenderPlan:
         """승인 게이트 통과 가능 상태 (구조 게이트 통과 기준)."""
         return self.structural.passed
 
+    @property
+    def voice_rate(self) -> float:
+        """TTS 낭독 속도. 템플릿 v2 `voice.speed` 선언을 그대로 따른다.
+
+        영속화하지 않는다 — 템플릿 스냅샷(payload)에서 매번 파생되므로
+        복원된 플랜도 승인 시점과 같은 값을 갖는다.
+        """
+        return self.template.voice.speed if self.template.voice else 1.0
+
 
 @dataclass(frozen=True)
 class RenderResult:
@@ -150,6 +159,7 @@ def build_video_params(plan: RenderPlan, *, n_threads: int = 1) -> VideoParams:
         video_materials=list(plan.materials),
         video_language=plan.language,
         voice_name=plan.voice_name,
+        voice_rate=plan.voice_rate,
         bgm_type="random",
         bgm_volume=0.2,
         subtitle_enabled=True,

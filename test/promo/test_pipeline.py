@@ -152,3 +152,20 @@ def test_execute_render_raises_on_missing_videos(template, env):
             task_runner=lambda *a, **k: {"videos": []},
             state_getter=lambda tid: {"state": const.TASK_STATE_COMPLETE},
         )
+
+
+def test_voice_rate_defaults_to_core_default_for_v1_template(template, env):
+    """v1 템플릿에는 voice 선언이 없으므로 코어 기본 속도(1.0)를 쓴다."""
+    plan = _make_plan(template, env)
+
+    assert plan.voice_rate == 1.0
+    assert build_video_params(plan).voice_rate == 1.0
+
+
+def test_voice_rate_follows_template_v2_voice_speed(env):
+    """템플릿 v2 voice.speed 가 렌더 파라미터 voice_rate 로 전달된다."""
+    data = dict(TEMPLATE_DATA, version=2, voice={"speed": 1.15})
+    plan = _make_plan(validate_template(data), env)
+
+    assert plan.voice_rate == 1.15
+    assert build_video_params(plan).voice_rate == 1.15

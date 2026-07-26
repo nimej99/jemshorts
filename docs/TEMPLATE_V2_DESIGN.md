@@ -145,9 +145,23 @@ fps/width 커스텀(코어 고정 1080x1920), narration_refs 간접 참조(우�
 
 ## 6. 구현 순서 (각각 독립 PR 크기)
 
-- (a) 스키마 v2 optional 필드 + 로더/검증 확장 — 코어 무접촉
+- **(a) 완료** — 스키마 v2 optional 필드 + 로더/검증 확장 (코어 무접촉).
+  `app/promo/templates/schema.py`:
+  - `Shot / Headline / VoiceSpec / TimingSpec` 추가, `Section.headline|shots|feel`,
+    `Template.style_preset|voice|timing` 전부 optional.
+  - `MAX_TEMPLATE_VERSION = 2` — 미지원 상위 버전은 거부(조용한 무시 금지).
+  - **version 1 문서에 v2 필드가 있으면 거부** — 무시하면 "선언한 것 ≠ 렌더된
+    것"이 되어 승인 게이트 전제가 깨진다.
+  - 샷/모션/크롭/타이밍 owner 는 닫힌 어휘 + 오브젝트 미지 키 거부(오타 차단),
+    `shots[0].kind == "wide"` 강제(컷인은 와이드 파생).
+  - 즉시 소비되는 두 필드: `voice.speed` → `VideoParams.voice_rate`
+    (`RenderPlan.voice_rate` 파생 프로퍼티 — 영속화 없이 템플릿 스냅샷에서 재계산),
+    `section.feel` / `section.headline` → `build_script_prompt` 힌트, 그리고
+    `char_budget` 이 낭독 속도만큼 글자수 예산을 비례 조정.
+  - 번들 시드 3종은 v1 유지 — 렌더 지원이 붙기 전까지 로테이션 동작 불변.
 - (b) 내레이션 실측 타이밍: 스크립트를 섹션별 문장으로 분할 → 문장별
   TTS 길이 실측 → 섹션 경계 재계산 → 코어 클립 길이 입력에 반영
+  (`timing.owner = narration` 소비 지점)
 - (c) 컷인 shots: 동일 소재 crop/zoom 파생 클립 생성 (ffmpeg crop+scale)
 - (d) headline 오버레이: moviepy TextClip 레이어 (코어 자막과 독립)
 - (e) style_preset → 소재 생성 프롬프트 (ComfyUI/외부 API 연동 시)
@@ -157,5 +171,5 @@ fps/width 커스텀(코어 고정 1080x1920), narration_refs 간접 참조(우�
 - vox-director / Orkas 는 **스펙 참고**(MIT — 필요 시 코드 차용도 가능하나
   현재는 설계 차용만). 근거 파일은 본 문서 서두에 고정.
 - postiz(AGPL) 는 별도 서비스 HTTP 호출로 채택 — `app/promo/publish.py`.
-- Scrapling(BSD-3) 은 네이버 공식 API 부족 시의 보조 카드 — enrich 계층
-  (PR #1) 머지 후 옵션 플래그로 통합 예정.
+- Scrapling(BSD-3) 은 네이버 공식 API 부족 시의 보조 카드 — enrich 계층에
+  옵션 플래그(`promo_scrapling_enabled`, 기본 off)로 통합 완료 (PR #3).
