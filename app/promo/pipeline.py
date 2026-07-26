@@ -17,6 +17,7 @@ MPT 코어는 수정하지 않는다. task_service/state 는 execute_render 내�
 
 from __future__ import annotations
 
+import math
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -26,7 +27,8 @@ from loguru import logger
 
 from app.models.schema import MaterialInfo, VideoAspect, VideoConcatMode, VideoParams
 from app.promo.brandkit.models import BrandKit
-from app.promo.materials import compose_materials
+from app.promo.materials import compose_materials, retime_materials
+from app.promo.materials.retime import DEFAULT_TAIL_PADDING_S
 from app.promo.quality import (
     GateResult,
     TechnicalExpectation,
@@ -43,6 +45,8 @@ DEFAULT_FONT_NAME = "NotoSansKR-Bold.otf"
 DEFAULT_LANGUAGE = "ko-KR"
 # M1 실측과 동일한 렌더 허용 오차 (오디오 길이에 따른 상하 여유)
 DEFAULT_DURATION_TOLERANCE_S = 2.0
+# 코어 combine_videos 의 클립 분할 단위 기본값 (M1 실측 구성과 동일)
+DEFAULT_CLIP_DURATION_S = 4
 
 
 class PipelineError(RuntimeError):
@@ -83,6 +87,19 @@ class RenderPlan:
         """
         return self.template.voice.speed if self.template.voice else 1.0
 
+    @property
+    def clip_duration_s(self) -> int:
+        """코어 `max_clip_duration`. 실측 타임라인이 있으면 가장 긴 섹션에 맞춘다.
+
+        소재가 이미 섹션 실측 길이이므로 이 값이 그보다 크거나 같아야 코어가
+        클립을 더 쪼개지 않는다 (= 화면 전환이 섹션 경계와 일치). 마지막
+        섹션에 붙는 꼬리 여유(retime.DEFAULT_TAIL_PADDING_S)까지 감안한다.
+        """
+        if self.narration is None:
+            return DEFAULT_CLIP_DURATION_S
+        longest = max(section.measured_s for section in self.narration.sections)
+        return max(DEFAULT_CLIP_DURATION_S, math.ceil(longest + DEFAULT_TAIL_PADDING_S))
+
 
 @dataclass(frozen=True)
 class RenderResult:
@@ -112,6 +129,7 @@ def plan_render(
     font_name: str = DEFAULT_FONT_NAME,
     language: str = DEFAULT_LANGUAGE,
     measure: MeasureFn | None = None,
+    retime: Callable[..., list[MaterialInfo]] | None = None,
 ) -> RenderPlan:
     """소재를 합성하고 사전 구조 게이트까지 판정한 RenderPlan 을 만든다.
 
@@ -121,8 +139,9 @@ def plan_render(
 
     템플릿이 v2 `timing.owner = "narration"` 을 선언하면 섹션별 내레이션을
     실측(기본: 코어 TTS, `measure` 로 주입 가능)해 타임라인 게이트까지
-    판정한다 — 렌더 비용을 쓰기 전에 "이 스크립트가 이 템플릿 길이에
-    맞는가"를 확정한다. 선언이 없으면 실측하지 않는다(v1 동작 그대로).
+    판정하고, 섹션 소재를 실측 길이 클립으로 다시 만든다(`retime` 로 주입
+    가능) — 렌더 비용을 쓰기 전에 "이 스크립트가 이 템플릿 길이에 맞는가"를
+    확정한다. 선언이 없으면 실측도 리타이밍도 하지 않는다(v1 동작 그대로).
     """
     if not script or not script.strip():
         raise ValueError("script 가 비어 있습니다: 렌더 플랜을 만들 수 없습니다")
@@ -152,9 +171,14 @@ def plan_render(
         narration = measure_narration(script, template, measure)
         timeline = timeline_gate(narration, template)
         if not timeline.passed:
-            logger.warning(
-                f"plan[{plan_id}] 타임라인 게이트 실패: {timeline.failures}"
-            )
+            logger.warning(f"plan[{plan_id}] 타임라인 게이트 실패: {timeline.failures}")
+        # 실측 경계를 화면에 반영한다: 섹션 소재를 실측 길이 클립으로 다시 만든다.
+        # 승인 게이트에 제시되는 소재 = 실제 렌더되는 소재를 유지하기 위해
+        # 렌더 시점이 아니라 플랜 시점에 만든다.
+        retime_fn = retime or retime_materials
+        materials = retime_fn(
+            materials, narration, storage_local_dir, retime_id=plan_id
+        )
 
     subject = f"{brandkit.business_name} — {template.name}"
     return RenderPlan(
@@ -184,7 +208,7 @@ def build_video_params(plan: RenderPlan, *, n_threads: int = 1) -> VideoParams:
         video_script=plan.script,
         video_aspect=VideoAspect.portrait,
         video_concat_mode=VideoConcatMode.sequential,
-        video_clip_duration=4,
+        video_clip_duration=plan.clip_duration_s,
         video_count=1,
         video_source="local",
         video_materials=list(plan.materials),

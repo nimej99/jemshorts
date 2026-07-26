@@ -72,12 +72,34 @@ def _narration_from_dict(data: dict) -> NarrationTiming:
     )
 
 
+def _materials_from_payload(payload: dict) -> tuple[MaterialInfo, ...]:
+    """소재 목록을 복원한다. 구버전 payload(material_urls)도 그대로 읽는다."""
+    entries = payload.get("materials")
+    if entries is None:
+        return tuple(
+            MaterialInfo(provider="local", url=url, duration=0)
+            for url in payload["material_urls"]
+        )
+    return tuple(
+        MaterialInfo(
+            provider="local",
+            url=entry["url"],
+            duration=int(entry.get("duration", 0)),
+        )
+        for entry in entries
+    )
+
+
 def save_plan(conn: sqlite3.Connection, plan: RenderPlan, template_raw: dict) -> None:
     """플랜을 planned 상태로 저장한다. plan_id 중복이면 sqlite3.IntegrityError."""
     payload = {
         "template": template_raw,
         "script": plan.script,
-        "material_urls": [m.url for m in plan.materials],
+        # 리타이밍 이후 소재는 길이(초)까지 의미를 갖는다 — url 만 저장하면
+        # 복원된 플랜이 승인 시점과 달라진다.
+        "materials": [
+            {"url": m.url, "duration": int(m.duration)} for m in plan.materials
+        ],
         "used_brand_count": plan.used_brand_count,
         "photo_warning": plan.photo_warning,
         "structural": _gate_to_dict(plan.structural),
@@ -118,10 +140,7 @@ def restore_plan(row: sqlite3.Row) -> RenderPlan:
         plan_id=row["plan_id"],
         template=template,
         script=payload["script"],
-        materials=tuple(
-            MaterialInfo(provider="local", url=url, duration=0)
-            for url in payload["material_urls"]
-        ),
+        materials=_materials_from_payload(payload),
         used_brand_count=int(payload["used_brand_count"]),
         photo_warning=bool(payload["photo_warning"]),
         structural=_gate_from_dict(payload["structural"]),

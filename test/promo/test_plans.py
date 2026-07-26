@@ -8,6 +8,7 @@ import json
 
 import pytest
 
+from app.models.schema import MaterialInfo
 from app.promo import db as promo_db
 from app.promo import plans
 from app.promo.brandkit.models import BrandKit
@@ -27,6 +28,18 @@ TEMPLATE_DATA = {
     "caption_template": "{shop_name}",
     "hashtags_base": ["테스트"],
 }
+
+
+def _fake_retime(materials, narration, storage_local_dir, *, retime_id=None):
+    """ffmpeg 없이 리타이밍 산출물 모양만 흉내낸다 (실제 검증은 test_retime.py)."""
+    return [
+        MaterialInfo(
+            provider="local",
+            url=f"{material.url}#retimed",
+            duration=int(round(section.measured_s)),
+        )
+        for material, section in zip(materials, narration.sections)
+    ]
 
 
 @pytest.fixture()
@@ -115,6 +128,7 @@ def test_roundtrip_preserves_measured_narration(conn, tmp_path):
         "첫 문장입니다. 둘째 문장입니다.",
         str(local_dir),
         measure=lambda text: next(measured),
+        retime=_fake_retime,
     )
     assert plan.narration.total_s == 11.0
 
@@ -144,3 +158,21 @@ def test_legacy_payload_without_narration_restores_none(conn, plan):
     assert restored.narration is None
     assert restored.timeline is None
     assert restored.approved_ready is True
+
+
+def test_legacy_material_urls_payload_still_restores(conn, plan):
+    """구버전 payload(material_urls, duration 없음)도 복원된다."""
+    plans.save_plan(conn, plan, TEMPLATE_DATA)
+    row = plans.get_row(conn, plan.plan_id)
+    payload = json.loads(row["payload_json"])
+    payload["material_urls"] = [entry["url"] for entry in payload.pop("materials")]
+    conn.execute(
+        "UPDATE promo_plans SET payload_json = ? WHERE plan_id = ?",
+        (json.dumps(payload, ensure_ascii=False), plan.plan_id),
+    )
+    conn.commit()
+
+    restored = plans.restore_plan(plans.get_row(conn, plan.plan_id))
+
+    assert [m.url for m in restored.materials] == [m.url for m in plan.materials]
+    assert all(m.duration == 0 for m in restored.materials)

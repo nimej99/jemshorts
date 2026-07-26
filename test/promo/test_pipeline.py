@@ -5,11 +5,15 @@ execute_render 의 배선(주입된 러너/상태 사용, 미완료/무산출 �
 검증한다. 실 렌더 e2e 는 scripts/m1_render_check.py 가 담당한다.
 """
 
+import shutil
+import subprocess
+
 import pytest
 
 from app.models import const
-from app.models.schema import VideoAspect, VideoConcatMode
+from app.models.schema import MaterialInfo, VideoAspect, VideoConcatMode
 from app.promo.brandkit.models import BrandKit
+from app.promo.materials import probe_duration
 from app.promo.pipeline import (
     PipelineError,
     build_video_params,
@@ -194,6 +198,19 @@ def _measure_sequence(*seconds):
     return _measure
 
 
+def _fake_retime(materials, narration, storage_local_dir, *, retime_id=None):
+    """ffmpeg 없이 리타이밍 결과 모양만 흉내낸다 (실제 리타이밍은 test_retime.py)."""
+    assert len(materials) == len(narration.sections)
+    return [
+        MaterialInfo(
+            provider="local",
+            url=f"{material.url}#retimed-{section.measured_s:g}",
+            duration=int(round(section.measured_s)),
+        )
+        for material, section in zip(materials, narration.sections)
+    ]
+
+
 def _explode(text: str) -> float:
     raise AssertionError("timing 선언이 없는데 내레이션 실측이 호출되었습니다")
 
@@ -217,6 +234,7 @@ def test_narration_owner_measures_and_passes_timeline_gate(env):
         NARRATION_SCRIPT,
         local_dir,
         measure=_measure_sequence(3.0, 8.0, 4.0),
+        retime=_fake_retime,
     )
 
     assert plan.narration is not None
@@ -238,9 +256,84 @@ def test_narration_out_of_range_blocks_approval(env):
         NARRATION_SCRIPT,
         local_dir,
         measure=_measure_sequence(9.0, 9.0, 9.0),
+        retime=_fake_retime,
     )
 
     assert plan.timeline.passed is False
     assert plan.structural.passed is True
     assert plan.approved_ready is False
     assert any("TIMELINE_COVERAGE_MISMATCH" in f for f in plan.timeline.failures)
+
+
+def test_clip_duration_follows_longest_measured_section(env):
+    """코어 max_clip_duration 은 가장 긴 섹션 이상이어야 클립이 더 쪼개지지 않는다."""
+    kit, stock_paths, local_dir = env
+    template = validate_template(NARRATION_TEMPLATE_DATA)
+
+    plan = plan_render(
+        template,
+        kit,
+        stock_paths,
+        NARRATION_SCRIPT,
+        local_dir,
+        measure=_measure_sequence(3.0, 8.4, 4.0),
+        retime=_fake_retime,
+    )
+
+    # 가장 긴 섹션 8.4초 + 꼬리 여유 1.0초 -> 올림 10
+    assert plan.clip_duration_s == 10
+    assert build_video_params(plan).video_clip_duration == 10
+    assert [m.duration for m in plan.materials] == [3, 8, 4]
+
+
+def test_clip_duration_defaults_without_narration(template, env):
+    plan = _make_plan(template, env)
+
+    assert plan.clip_duration_s == 4
+    assert build_video_params(plan).video_clip_duration == 4
+
+
+@pytest.mark.skipif(
+    shutil.which("ffmpeg") is None or shutil.which("ffprobe") is None,
+    reason="실 리타이밍 경로 검증에는 ffmpeg/ffprobe 가 필요합니다",
+)
+def test_plan_retimes_real_materials_to_measured_lengths(tmp_path):
+    """주입 없이 실제 경로로: 플랜 소재가 실측 섹션 길이 클립이 된다."""
+    brand_dir = tmp_path / "brand"
+    local_dir = tmp_path / "local_videos"
+    brand_dir.mkdir()
+    local_dir.mkdir()
+    sources = []
+    for index, name in enumerate(("b1.mp4", "b2.mp4", "b3.mp4")):
+        target = brand_dir / name
+        subprocess.run(
+            [
+                "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+                "-f", "lavfi", "-i", f"color=c=red:s=320x568:d={index + 2}",
+                "-r", "30", "-pix_fmt", "yuv420p", str(target),
+            ],
+            check=True,
+            capture_output=True,
+            timeout=120,
+        )
+        sources.append(str(target))
+
+    kit = BrandKit(business_name="우리가게", photos=sources)
+    template = validate_template(NARRATION_TEMPLATE_DATA)
+
+    plan = plan_render(
+        template,
+        kit,
+        [],
+        NARRATION_SCRIPT,
+        str(local_dir),
+        plan_id="retime-plan",
+        measure=_measure_sequence(3.0, 8.0, 4.0),
+    )
+
+    assert plan.approved_ready is True
+    for material, section in zip(plan.materials, plan.narration.sections):
+        assert "retime-plan" in material.url
+        expected = section.measured_s + (1.0 if section.role == "cta" else 0.0)
+        assert abs(probe_duration(material.url) - expected) <= 0.15
+    assert plan.clip_duration_s == 9
