@@ -407,7 +407,7 @@ class _FakeCue:
 
         self.start = timedelta(seconds=start)
         self.end = timedelta(seconds=end)
-        self.text = text
+        self.content = text
 
 
 class _FakeSubMaker:
