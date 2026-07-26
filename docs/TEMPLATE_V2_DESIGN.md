@@ -132,16 +132,22 @@ fps/width 커스텀(코어 고정 1080x1920), narration_refs 간접 참조(우�
 
 ## 5. 게이트 확장 (Orkas 검증기 차용)
 
-`structural_gate` v2 — failures 에 기계 판독 코드 도입:
+**구현 완료** — 모든 게이트 failures/warnings 가 `CODE: 사유` 형식이 됐다
+(`app/promo/quality/gates.py`). 코드는 기계 판독용, 뒤 문장은 사용자 노출용.
 
-| 코드 | 판정 | 허용오차 |
-| --- | --- | --- |
-| `SECTION_GAP` | 섹션 경계 사이 공백 | +0.05s |
-| `SECTION_OVERLAP` | 섹션 겹침 | −0.001s |
-| `TIMELINE_COVERAGE_MISMATCH` | 섹션 합계 vs 실측 오디오 길이 | ±`timing.tolerance_s` |
-| `HEADLINE_MISSING_ON_HOOK` | hook 에 headline.show=true 인데 텍스트 없음 | — |
+| 코드 | 게이트 | 판정 | 허용오차 |
+| --- | --- | --- | --- |
+| `TIMELINE_COVERAGE_MISMATCH` | timeline | 실측 내레이션 총 길이 vs `total_duration_range` | ±`timing.tolerance_s` |
+| `SECTION_DURATION_DRIFT` | timeline (warning) | 섹션 목표 대비 실측 편차 | max(tolerance, 목표×25%) |
+| `SECTION_ROLE_MISSING` / `MATERIALS_EMPTY` / `BRAND_MATERIAL_MISSING` | structural | 기존 판정에 코드 부여 | — |
+| `BRAND_MATERIAL_DOWNGRADED` | structural (warning) | 브랜드 소재 0개 강등 사유 | — |
+| `FILE_MISSING` / `PROBE_FAILED` / `VIDEO_STREAM_MISSING` / `AUDIO_STREAM_MISSING` / `RESOLUTION_MISMATCH` / `DURATION_UNREADABLE` / `DURATION_OUT_OF_RANGE` | technical | 기존 판정에 코드 부여 | — |
 
-(섹션 경계 실측값은 TTS 문장별 길이에서 나온다 — 구현 (b) 이후 활성.)
+설계안에 있던 `SECTION_GAP` / `SECTION_OVERLAP` 은 **채택하지 않는다**:
+섹션 경계를 0 부터 실측 누적으로 계산하므로(`app/promo/timing.py`) 공백과
+겹침이 구조적으로 발생할 수 없다. 없는 실패를 검사하는 코드는 죽은 코드다.
+`HEADLINE_MISSING_ON_HOOK` 도 불필요 — 스키마가 `headline.template` 을
+비어있지 않은 문자열로 강제하므로 게이트까지 갈 수 없다.
 
 ## 6. 구현 순서 (각각 독립 PR 크기)
 
@@ -159,9 +165,25 @@ fps/width 커스텀(코어 고정 1080x1920), narration_refs 간접 참조(우�
     `section.feel` / `section.headline` → `build_script_prompt` 힌트, 그리고
     `char_budget` 이 낭독 속도만큼 글자수 예산을 비례 조정.
   - 번들 시드 3종은 v1 유지 — 렌더 지원이 붙기 전까지 로테이션 동작 불변.
-- (b) 내레이션 실측 타이밍: 스크립트를 섹션별 문장으로 분할 → 문장별
-  TTS 길이 실측 → 섹션 경계 재계산 → 코어 클립 길이 입력에 반영
-  (`timing.owner = narration` 소비 지점)
+- **(b-1) 완료** — 내레이션 실측 타이밍의 앞단 (`app/promo/timing.py`).
+  - 스크립트를 문장으로 분리 → 섹션 목표 길이 비율대로 배분(섹션당 최소
+    1문장, 원문 순서 보존) → 섹션별 낭독 길이 **실측** → 0 부터 누적으로
+    섹션 경계 확정.
+  - 실측 함수는 주입식(`MeasureFn`). 기본 구현 `tts_measurer` 는 코어 TTS 를
+    지연 임포트해 쓰고, 측정 오디오는 임시 디렉터리에 쓴 뒤 즉시 지운다.
+  - `plan_render` 는 템플릿이 `timing.owner = "narration"` 을 선언한 경우에만
+    실측한다. 결과는 `RenderPlan.narration` + `timeline_gate` 판정
+    (`RenderPlan.timeline`)으로 승인 게이트에 제시되고, 실패면
+    `approved_ready = False` — **렌더 비용을 쓰기 전에** 길이 불일치를 잡는다.
+  - 실측값과 게이트 판정은 payload 에 영속화한다 (재측정 편차로 승인 결과가
+    뒤집히면 안 된다). 구버전 payload 는 키 없이도 복원된다.
+- (b-2) 실측 경계를 렌더에 반영: 섹션별 소재를 실측 길이로 잘라내고
+  `video_clip_duration` 을 그에 맞춘다. 오디오 재생성을 피하려면 코어
+  `start(..., voice_preview={script, voice_name, voice_rate, voice_volume,
+  audio_file, duration, sub_maker})` 재사용 경로를 쓴다 — `audio_file` 이
+  `utils.task_dir(task_id)` 안이고 `voice_volume == 1.0` 일 때만 채택된다
+  (`app/services/task.py:_resolve_reusable_voice_preview`). 이 경로면 sub_maker
+  가 함께 전달돼 자막도 그대로 생성된다.
 - (c) 컷인 shots: 동일 소재 crop/zoom 파생 클립 생성 (ffmpeg crop+scale)
 - (d) headline 오버레이: moviepy TextClip 레이어 (코어 자막과 독립)
 - (e) style_preset → 소재 생성 프롬프트 (ComfyUI/외부 API 연동 시)

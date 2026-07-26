@@ -18,6 +18,7 @@ from app.models.schema import MaterialInfo
 from app.promo.pipeline import RenderPlan
 from app.promo.quality import GateResult
 from app.promo.templates.schema import validate_template
+from app.promo.timing import NarrationTiming, SectionTiming
 
 STATUS_PLANNED = "planned"
 STATUS_RENDERING = "rendering"
@@ -41,6 +42,36 @@ def _gate_from_dict(data: dict) -> GateResult:
     )
 
 
+def _narration_to_dict(narration: NarrationTiming) -> dict:
+    return {
+        "sections": [
+            {
+                "role": section.role,
+                "text": section.text,
+                "target_s": section.target_s,
+                "measured_s": section.measured_s,
+                "start_s": section.start_s,
+            }
+            for section in narration.sections
+        ]
+    }
+
+
+def _narration_from_dict(data: dict) -> NarrationTiming:
+    return NarrationTiming(
+        sections=tuple(
+            SectionTiming(
+                role=section["role"],
+                text=section["text"],
+                target_s=float(section["target_s"]),
+                measured_s=float(section["measured_s"]),
+                start_s=float(section["start_s"]),
+            )
+            for section in data["sections"]
+        )
+    )
+
+
 def save_plan(conn: sqlite3.Connection, plan: RenderPlan, template_raw: dict) -> None:
     """플랜을 planned 상태로 저장한다. plan_id 중복이면 sqlite3.IntegrityError."""
     payload = {
@@ -54,6 +85,9 @@ def save_plan(conn: sqlite3.Connection, plan: RenderPlan, template_raw: dict) ->
         "font_name": plan.font_name,
         "language": plan.language,
         "subject": plan.subject,
+        # 실측 타임라인은 재측정하면 값이 흔들린다 — 승인 시점 값을 그대로 보존한다.
+        "narration": _narration_to_dict(plan.narration) if plan.narration else None,
+        "timeline": _gate_to_dict(plan.timeline) if plan.timeline else None,
     }
     conn.execute(
         "INSERT INTO promo_plans (plan_id, status, template_id, payload_json) "
@@ -95,6 +129,14 @@ def restore_plan(row: sqlite3.Row) -> RenderPlan:
         font_name=payload["font_name"],
         language=payload["language"],
         subject=payload["subject"],
+        narration=(
+            _narration_from_dict(payload["narration"])
+            if payload.get("narration")
+            else None
+        ),
+        timeline=(
+            _gate_from_dict(payload["timeline"]) if payload.get("timeline") else None
+        ),
     )
 
 

@@ -4,6 +4,8 @@
 failed 재렌더 허용을 검증한다.
 """
 
+import json
+
 import pytest
 
 from app.promo import db as promo_db
@@ -83,3 +85,62 @@ def test_finish_rejects_non_terminal_status(conn, plan):
     plans.save_plan(conn, plan, TEMPLATE_DATA)
     with pytest.raises(ValueError, match="종료 상태"):
         plans.finish(conn, plan.plan_id, plans.STATUS_RENDERING, {})
+
+
+def test_roundtrip_preserves_measured_narration(conn, tmp_path):
+    """실측 타임라인/게이트 판정은 저장-복원 후에도 동일해야 한다.
+
+    (승인 시점 값이 보존되지 않으면 재측정 편차로 승인 결과가 바뀐다.)
+    """
+    local_dir = tmp_path / "local_videos_v2"
+    brand_dir = tmp_path / "brand_v2"
+    local_dir.mkdir()
+    brand_dir.mkdir()
+    clip = brand_dir / "b1.mp4"
+    clip.write_bytes(b"dummy")
+
+    raw = dict(
+        TEMPLATE_DATA,
+        template_id="plans-test-v2",
+        version=2,
+        timing={"owner": "narration", "tolerance_s": 0.2},
+    )
+    template = validate_template(raw)
+    kit = BrandKit(business_name="가게", photos=[str(clip)])
+    measured = iter([4.0, 7.0])
+    plan = plan_render(
+        template,
+        kit,
+        [],
+        "첫 문장입니다. 둘째 문장입니다.",
+        str(local_dir),
+        measure=lambda text: next(measured),
+    )
+    assert plan.narration.total_s == 11.0
+
+    plans.save_plan(conn, plan, raw)
+    restored = plans.restore_plan(plans.get_row(conn, plan.plan_id))
+
+    assert restored == plan
+    assert restored.narration.boundaries == ((0.0, 4.0), (4.0, 11.0))
+    assert restored.timeline.passed is True
+
+
+def test_legacy_payload_without_narration_restores_none(conn, plan):
+    """v2 이전에 저장된 플랜(payload 에 narration 키 없음)도 그대로 복원된다."""
+    plans.save_plan(conn, plan, TEMPLATE_DATA)
+    row = plans.get_row(conn, plan.plan_id)
+    payload = json.loads(row["payload_json"])
+    del payload["narration"]
+    del payload["timeline"]
+    conn.execute(
+        "UPDATE promo_plans SET payload_json = ? WHERE plan_id = ?",
+        (json.dumps(payload, ensure_ascii=False), plan.plan_id),
+    )
+    conn.commit()
+
+    restored = plans.restore_plan(plans.get_row(conn, plan.plan_id))
+
+    assert restored.narration is None
+    assert restored.timeline is None
+    assert restored.approved_ready is True
