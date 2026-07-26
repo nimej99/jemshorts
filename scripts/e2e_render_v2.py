@@ -137,15 +137,24 @@ def main() -> int:
     assert result.technical.passed, f"technical_gate 실패: {result.technical.failures}"
     final_video = result.videos[0]
 
-    # 3. 산출물 길이 == 실측 총 길이 (오디오 재사용 증거 — 재합성하면 어긋남)
+    # 3. 산출물 길이 == 실측 오디오 파일 길이 (오디오 재사용의 정확한 증거).
+    #    combine_videos 는 영상을 오디오 파일 길이에 맞춰 자르므로, 실측 때 만든
+    #    오디오를 재사용했다면 산출물 길이가 그 파일과 거의 같아야 한다.
+    #    (cue 기반 narration.total_s 는 "말이 끝나는 지점"이라 mp3 후미 침묵만큼
+    #     파일 길이보다 짧다 — 그래서 파일 길이와 비교해야 재사용 입증이 정확하다.)
+    assert plan.narration_audio is not None, "실측 오디오 핸들이 없습니다"
+    narration_file_duration = ffprobe_duration(plan.narration_audio.audio_file)
     output_duration = ffprobe_duration(final_video)
-    drift = abs(output_duration - narration.total_s)
+    reuse_drift = abs(output_duration - narration_file_duration)
+    speech_tail = narration_file_duration - narration.total_s
     print(
         f"render[{result.task_id}]: 산출물 {output_duration:.2f}초 vs "
-        f"실측 {narration.total_s:g}초 (차이 {drift:.2f}초)"
+        f"실측 오디오 파일 {narration_file_duration:.2f}초 "
+        f"(차이 {reuse_drift:.2f}초, 음성 종료→파일 끝 {speech_tail:.2f}초)"
     )
-    assert drift < 1.0, (
-        f"산출물 길이가 실측과 {drift:.2f}초 차이 — 오디오 재사용이 안 된 듯"
+    assert reuse_drift < 0.5, (
+        f"산출물 길이가 실측 오디오 파일과 {reuse_drift:.2f}초 차이 — "
+        "오디오 재사용이 안 된 듯"
     )
 
     # 4. 컷/섹션 경계에서 프레임이 실제로 달라지는지
@@ -166,8 +175,9 @@ def main() -> int:
         "final_video": final_video,
         "render_seconds": result.render_seconds,
         "narration_total_s": narration.total_s,
+        "narration_audio_file_s": round(narration_file_duration, 2),
         "output_duration_s": round(output_duration, 2),
-        "duration_drift_s": round(drift, 2),
+        "audio_reuse_drift_s": round(reuse_drift, 2),
         "clip_seconds": plan.clip_seconds,
         "timeline_gate": {
             "passed": plan.timeline.passed,
