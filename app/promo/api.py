@@ -401,18 +401,15 @@ def upload_plan(plan_id: str, body: UploadRequest | None = None):
         title = body.title or plan.subject
         description = body.description or f"{plan.subject}\n\n{' '.join(hashtags)}"
 
-        from app.services import upload_post  # 지연 임포트
+        from app.promo import publish  # 지연 임포트
 
-        upload_result = upload_post.cross_post_video(
+        upload_result = publish.publish_video(
             videos[0],
             title,
+            description,
+            [tag.lstrip("#") for tag in hashtags],
+            privacy_status=body.privacy_status,
             platforms=body.platforms,
-            youtube_extra={
-                "youtube_title": title,
-                "youtube_description": description,
-                "tags": [tag.lstrip("#") for tag in hashtags],
-                "privacyStatus": body.privacy_status,
-            },
         )
         if not upload_result.get("success"):
             raise HTTPException(

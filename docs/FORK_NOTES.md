@@ -62,3 +62,23 @@ promo-shorts 는 [MoneyPrinterTurbo](https://github.com/harry0703/MoneyPrinterTu
   --sub-langs "ko,en" --js-runtimes node <URL>`), 레퍼런스 리서치.
 - **agency-agents (MIT)**: 개별 페르소나 파일만 참고용으로
   `~/.claude/agents/` 에 설치 (video-streaming-engineer, prompt-engineer).
+
+## 외부 코드/도구 채택 결정 2차 (2026-07-25)
+
+- **Postiz (AGPL-3.0) 채택**: 셀프호스트 소셜 스케줄링. 별도 서비스로
+  띄우고 공개 API 만 HTTP 호출 (`app/promo/publish.py`) — 코드 결합이
+  없어 LICENSE 영향 없음. upload-post.com(유료) 대체 경로.
+  셀프호스트 실기동 검증은 운영 셋업 시점에 수행 (어댑터는 공식 API 문서
+  docs.postiz.com/public-api 기준 구현 + 모킹 테스트 완료).
+- **Scrapling (BSD-3) 조건부 채택**: 네이버 공식 지역검색 API 로 부족할
+  때의 보조 수집 카드. enrich 계층(PR #1)에 의존하므로 **PR #1 머지 후**
+  config 옵션 플래그로 통합한다. 봇차단 우회는 약관 리스크 상존 — 기본
+  비활성.
+- **last30days-skill (MIT)**: dev-time 리서치 스킬. `~/.claude/skills/
+  last30days` 에 설치 완료. 니치/경쟁 조사용, 제품 임베드 아님.
+- **reelforge (Apache-2.0) 참고 채택**: Korean-first 동일 도메인. 한국어
+  자막/폰트(Pretendard, D2Coding OFL) 처리 벤치마크 대상. 코드 차용 시
+  Apache 고지 유지.
+- **vox-director / Orkas-VideoStudio (MIT) 설계 차용**: beats/timeline
+  스펙 분석 → 템플릿 v2 설계 (`docs/TEMPLATE_V2_DESIGN.md`). 코드 차용
+  아님 (필요 시 MIT 라 가능).
