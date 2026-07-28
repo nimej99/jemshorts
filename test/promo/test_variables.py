@@ -172,8 +172,11 @@ def test_headline_texts_fill_variables(template, kit):
     assert texts[1] is None  # cta 는 헤드라인 없음
 
 
-def test_headline_texts_keep_unfilled_literal(template, kit):
-    """변수 없이도 브랜드킷 값은 채워지고 동적 값은 원문이 남는다."""
+def test_headline_texts_skip_unfilled_banner(template, kit):
+    """동적 변수가 미충전이면 원문 배너 대신 배너를 생략한다 (None).
+
+    영상에 `{menu_name}` 같은 원문이 박히면 안 되므로 — 자동 공개 안전장치.
+    """
     texts = headline_texts(template, kit)
 
-    assert texts[0] == "우리분식 {menu_name} 출시!"
+    assert texts[0] is None  # {menu_name} 미충전 → 배너 생략

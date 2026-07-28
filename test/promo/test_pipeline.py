@@ -383,7 +383,7 @@ def test_section_shots_expand_into_multiple_clips(env):
 
 
 def test_headline_texts_fill_brand_context_and_respect_show_flag():
-    """헤드라인은 브랜드 정보로 채우고, show=false 섹션은 배너를 만들지 않는다."""
+    """헤드라인은 브랜드 정보 + 변수로 채우고, show=false 는 배너를 만들지 않는다."""
     from app.promo.pipeline import headline_texts
 
     data = dict(NARRATION_TEMPLATE_DATA, template_id="pipeline-headline-v2")
@@ -391,11 +391,16 @@ def test_headline_texts_fill_brand_context_and_respect_show_flag():
     data["structure"][0]["headline"] = {"template": "{shop_name} {menu_name} 출시!"}
     data["structure"][1]["headline"] = {"template": "숨김", "show": False}
     kit = BrandKit(business_name="우리분식", category="음식점")
+    template = validate_template(data)
 
-    texts = headline_texts(validate_template(data), kit)
-
-    # 못 채운 {menu_name} 은 원문이 남아 승인 화면에서 누락이 보인다.
-    assert texts == ["우리분식 {menu_name} 출시!", None, None]
+    # 변수가 있으면 브랜드 정보와 함께 채워진다.
+    assert headline_texts(template, kit, {"menu_name": "매운떡볶이"}) == [
+        "우리분식 매운떡볶이 출시!",
+        None,
+        None,
+    ]
+    # 변수가 없어 플레이스홀더가 남으면 원문 배너 대신 생략(None) — 자동 공개 안전장치.
+    assert headline_texts(template, kit) == [None, None, None]
 
 
 # --- 실측 오디오 재사용 (b-3) -------------------------------------------------
