@@ -2,8 +2,10 @@
 
 from app.promo.research.hints import (
     DEFAULT_CHARS_PER_SEC,
+    VARIABLES_MARKER,
     build_script_prompt,
     char_budget,
+    parse_script_response,
 )
 from app.promo.research.material_prompts import (
     MaterialPrompt,
@@ -30,6 +32,8 @@ __all__ = [
     "build_material_prompts",
     "build_script_prompt",
     "char_budget",
+    "parse_script_response",
+    "VARIABLES_MARKER",
     "fetch_subtitles",
     "parse_vtt",
 ]

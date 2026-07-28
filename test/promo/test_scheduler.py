@@ -417,3 +417,94 @@ def test_tick_survives_v2_tts_failure_as_missed(autopilot_v2_env, monkeypatch):
     assert report["ran"] == []
     assert [entry["run"] for entry in report["missed"]] == [due]
     assert "TTS 합성" in report["missed"][0]["cause"]
+
+
+# ── v2 동적 변수: LLM 응답의 [변수] 블록이 플랜까지 흐르는가 ──────────
+
+SCHED_VARS_TEMPLATE = {
+    "template_id": "sched-vars-v2",
+    "name": "스케줄 변수 테스트",
+    "version": 2,
+    "mood": "upbeat",
+    "structure": [
+        {
+            "role": "hook",
+            "duration_s": 3,
+            "script_guide": "훅",
+            "material_slot": "any",
+            "headline": {"template": "{shop_name} {menu_name}!", "show": True},
+        },
+        {"role": "cta", "duration_s": 8, "script_guide": "cta", "material_slot": "any"},
+    ],
+    "total_duration_range": [10, 15],
+    "caption_template": "{shop_name} {menu_name} 출시!",
+    "hashtags_base": ["테스트"],
+}
+
+
+@pytest.fixture()
+def autopilot_vars_env(conn, tmp_path, monkeypatch):
+    """동적 변수가 있는 v2 템플릿 오토파일럿 환경."""
+    clip = tmp_path / "brand.mp4"
+    clip.write_bytes(b"dummy")
+    brandkit_store.save(conn, BrandKit(business_name="우리가게", photos=[str(clip)]))
+
+    templates_dir = tmp_path / "templates-data"
+    templates_dir.mkdir()
+    (templates_dir / "sched-vars.json").write_text(
+        json.dumps(SCHED_VARS_TEMPLATE, ensure_ascii=False), encoding="utf-8"
+    )
+    monkeypatch.setattr(scheduler, "templates_data_dir", lambda: str(templates_dir))
+
+    local_dir = tmp_path / "local_videos"
+    local_dir.mkdir()
+    monkeypatch.setattr(
+        scheduler.utils, "storage_dir", lambda sub="", create=False: str(local_dir)
+    )
+
+    from app.services import llm
+
+    # LLM 이 내레이션 + [변수] 블록을 돌려준다.
+    monkeypatch.setattr(
+        llm,
+        "_generate_response",
+        lambda prompt: "자동 생성 내레이션입니다.\n[변수]\nmenu_name: 매운 떡볶이",
+    )
+
+    video = tmp_path / "final-vars.mp4"
+    video.write_bytes(b"x")
+    monkeypatch.setattr(
+        pipeline,
+        "execute_render",
+        lambda plan, *, task_id=None, **kw: pipeline.RenderResult(
+            task_id=task_id,
+            plan_id=plan.plan_id,
+            videos=(str(video),),
+            render_seconds=1.0,
+            technical=GateResult(passed=True, failures=[], warnings=[]),
+        ),
+    )
+
+    captured = {}
+    from app.promo import publish
+
+    monkeypatch.setattr(
+        publish,
+        "publish_video",
+        lambda video, title, description, tags, **kw: captured.update(description=description)
+        or {"success": True, "request_id": "req-vars"},
+    )
+    return conn, captured
+
+
+def test_autopilot_v2_parses_variables_into_plan_and_caption(autopilot_vars_env):
+    """LLM 응답의 [변수] 가 플랜에 실리고, 자동 업로드 캡션이 실제 값으로 채워진다."""
+    conn, captured = autopilot_vars_env
+    outcome = scheduler.run_autopilot_once(conn)
+
+    assert outcome["request_id"] == "req-vars"
+    restored = plans.restore_plan(plans.get_row(conn, outcome["plan_id"]))
+    assert restored.variables == {"menu_name": "매운 떡볶이"}
+    # 캡션이 subject 폴백이 아니라 채워진 caption_template 이어야 한다.
+    assert "우리가게 매운 떡볶이 출시!" in captured["description"]
+    assert "{menu_name}" not in captured["description"]

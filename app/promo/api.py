@@ -37,9 +37,11 @@ from app.promo.research import (
     build_material_prompts,
     build_script_prompt,
     fetch_subtitles,
+    parse_script_response,
     parse_vtt,
 )
 from app.promo.templates.schema import (
+    Template,
     TemplateValidationError,
     load_all_raw,
     validate_template,
@@ -333,11 +335,12 @@ def research_reference(body: ReferenceRequest):
 
 def _resolve_script_prompt(
     body: ScriptPromptRequest,
-) -> tuple[str, bool, list[str]]:
+) -> tuple[str, bool, list[str], Template]:
     """템플릿+브랜드킷(+레퍼런스 실측+트렌드)으로 프롬프트를 만든다.
 
-    반환: (prompt, reference_used). 레퍼런스 URL 이 주어졌는데 실측에
-    실패하면 502 (조용한 강등 금지 — 레퍼런스 없이 진행하려면 URL 을 빼라).
+    반환: (prompt, reference_used, trend_keywords, template). 레퍼런스 URL 이
+    주어졌는데 실측에 실패하면 502 (조용한 강등 금지 — 레퍼런스 없이 진행하려면
+    URL 을 빼라). template 은 응답에서 동적 변수를 파싱하는 데 쓴다.
     """
     raw = _find_raw_template(body.template_id)
     template = validate_template(raw, source=body.template_id)
@@ -370,7 +373,7 @@ def _resolve_script_prompt(
     prompt = build_script_prompt(
         template, kit, reference, trend_keywords=trend_keywords or None
     )
-    return prompt, reference is not None, trend_keywords
+    return prompt, reference is not None, trend_keywords, template
 
 
 class MaterialPromptRequest(BaseModel):
@@ -412,7 +415,7 @@ def material_prompts(body: MaterialPromptRequest):
 
 @router.post("/script-prompt")
 def script_prompt(body: ScriptPromptRequest):
-    prompt, reference_used, trend_keywords = _resolve_script_prompt(body)
+    prompt, reference_used, trend_keywords, _template = _resolve_script_prompt(body)
     return {
         "template_id": body.template_id,
         "prompt": prompt,
@@ -428,20 +431,27 @@ def generate_script(body: ScriptPromptRequest):
     코어 `llm._generate_response` 는 실패를 "Error: ..." 문자열로
     반환하므로 여기서 502 로 승격한다 (조용한 오류 문자열 전파 금지).
     """
-    prompt, reference_used, trend_keywords = _resolve_script_prompt(body)
+    prompt, reference_used, trend_keywords, template = _resolve_script_prompt(body)
 
     from app.services import llm  # 지연 임포트 (LLM SDK 로드 비용)
 
     response = llm._generate_response(prompt)
-    script = (response or "").strip()
-    if not script or script.startswith("Error:"):
+    raw = (response or "").strip()
+    if not raw or raw.startswith("Error:"):
         raise HTTPException(
             status_code=502,
-            detail=f"스크립트 생성 실패: {script or '빈 응답'}",
+            detail=f"스크립트 생성 실패: {raw or '빈 응답'}",
+        )
+    # 템플릿이 동적 변수를 요구하면 응답의 [변수] 블록을 파싱해 분리한다.
+    script, variables = parse_script_response(raw, required_variables(template))
+    if not script:
+        raise HTTPException(
+            status_code=502, detail="스크립트 생성 실패: 내레이션이 비어 있습니다"
         )
     return {
         "template_id": body.template_id,
         "script": script,
+        "variables": variables,
         "reference_used": reference_used,
         "trend_keywords": trend_keywords,
     }
