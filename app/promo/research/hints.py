@@ -12,10 +12,43 @@ from typing import Sequence
 from app.promo.brandkit.models import BrandKit
 from app.promo.research.ingest import ReferenceStats
 from app.promo.templates.schema import Template
+from app.promo.templates.variables import required_variables
 
 # 레퍼런스가 없을 때의 기본 페이싱 (한국어 TTS 낭독 실측 통념치, 초당 글자수)
 DEFAULT_CHARS_PER_SEC = 4.5
 
+# LLM 응답에서 내레이션과 동적 변수 블록을 가르는 표지. build_script_prompt 가
+# 요구하고 parse_script_response 가 파싱한다 (템플릿 변수 엔진 — PR "variables").
+VARIABLES_MARKER = "[변수]"
+
+
+def parse_script_response(
+    text: str, required_keys: Sequence[str]
+) -> tuple[str, dict[str, str]]:
+    """LLM 응답을 (내레이션, 변수 dict) 로 분리한다.
+
+    `[변수]` 블록이 있으면 그 뒤의 "키: 값" 줄을 파싱한다. 블록이 없으면
+    (구형 응답/변수 불필요 템플릿) 전체를 내레이션으로 보고 변수는 비운다 —
+    하위호환. `required_keys` 에 없는 키는 무시한다(프롬프트 주입 방어).
+    """
+    text = (text or "").strip()
+    if VARIABLES_MARKER not in text:
+        return text, {}
+
+    narration_part, _, vars_part = text.partition(VARIABLES_MARKER)
+    narration = narration_part.strip()
+    required = set(required_keys)
+    variables: dict[str, str] = {}
+    for raw_line in vars_part.splitlines():
+        line = raw_line.strip().lstrip("-•*·").strip()
+        if not line or ":" not in line:
+            continue
+        key, _, value = line.partition(":")
+        key = key.strip()
+        value = value.strip().strip('"').strip()
+        if key in required and value:
+            variables[key] = value
+    return narration, variables
 
 def char_budget(template: Template, chars_per_sec: float) -> int:
     """템플릿 총 길이와 페이싱으로 스크립트 글자수(공백 제외) 예산을 계산한다.
@@ -92,8 +125,35 @@ def build_script_prompt(
             + ", ".join(trend_keywords),
             "가게/업종과 자연스럽게 연결될 때만 활용하고, 관련 없으면 무시하세요.",
         ]
-    lines += [
-        "",
-        "출력은 내레이션 문장만, 섹션 구분 표시 없이 이어서 작성하세요.",
-    ]
+    required = required_variables(template)
+    if not required:
+        lines += [
+            "",
+            "출력은 내레이션 문장만, 섹션 구분 표시 없이 이어서 작성하세요.",
+        ]
+    else:
+        lines += [
+            "",
+            "[출력 형식]",
+            "1. 먼저 내레이션 문장을 섹션 구분 없이 이어서 작성하세요.",
+            f'2. 그 다음 줄에 "{VARIABLES_MARKER}" 를 쓰고, 아래 항목을 '
+            '"키: 값" 형식으로 한 줄씩 작성하세요.',
+            "",
+            "[변수 항목] 캡션/화면 헤드라인에 들어갈 값입니다:",
+        ]
+        lines += [f"- {name}" for name in required]
+        # 캡션/헤드라인 템플릿을 맥락으로 제시해 각 변수의 의미를 유추하게 한다.
+        lines.append(f'캡션 템플릿 참고: "{template.caption_template}"')
+        headline_templates = [
+            section.headline.template
+            for section in template.structure
+            if section.headline is not None and section.headline.show
+        ]
+        if headline_templates:
+            lines.append(
+                "헤드라인 참고: "
+                + " / ".join(f'"{h}"' for h in headline_templates)
+            )
+        lines += ["", "출력 예시:", "내레이션 본문입니다. 문장을 이어갑니다.", VARIABLES_MARKER]
+        lines += [f"{name}: (값)" for name in required]
     return "\n".join(lines)

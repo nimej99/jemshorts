@@ -29,8 +29,9 @@ from loguru import logger
 from app.promo import db as promo_db
 from app.promo import pipeline, plans, trends, uploads
 from app.promo.brandkit import store as brandkit_store
-from app.promo.research import build_script_prompt
+from app.promo.research import build_script_prompt, parse_script_response
 from app.promo.templates.schema import load_all_raw, validate_template
+from app.promo.templates.variables import required_variables
 from app.utils import utils
 
 # freq 하드 상한 (일일 상한과 별개의 최종 가드 — 3/일 * 7일)
@@ -195,12 +196,19 @@ def run_autopilot_once(conn: sqlite3.Connection) -> dict:
     from app.services import llm  # 지연 임포트
 
     response = llm._generate_response(prompt)
-    script = (response or "").strip()
-    if not script or script.startswith("Error:"):
-        raise SchedulerError(f"스크립트 생성 실패: {script or '빈 응답'}")
+    raw_response = (response or "").strip()
+    if not raw_response or raw_response.startswith("Error:"):
+        raise SchedulerError(f"스크립트 생성 실패: {raw_response or '빈 응답'}")
+    # 템플릿이 동적 변수를 요구하면 [변수] 블록을 파싱해 플랜에 싣는다 —
+    # 캡션/헤드라인이 실제 값으로 채워진 채 자동 업로드까지 간다.
+    script, variables = parse_script_response(
+        raw_response, required_variables(template)
+    )
+    if not script:
+        raise SchedulerError("스크립트 생성 실패: 내레이션이 비어 있습니다")
 
     local_dir = utils.storage_dir("local_videos", create=True)
-    plan = pipeline.plan_render(template, kit, [], script, local_dir)
+    plan = pipeline.plan_render(template, kit, [], script, local_dir, variables=variables)
     if not plan.approved_ready:
         raise SchedulerError(f"사전 구조 게이트 실패: {plan.structural.failures}")
     plans.save_plan(conn, plan, raw)

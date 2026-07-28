@@ -266,6 +266,38 @@ def test_generate_script_llm_error_502(client, monkeypatch):
     assert "api_key" in response.json()["detail"]
 
 
+def test_generate_script_parses_variables_block(client, monkeypatch, tmp_path):
+    """v2 템플릿: LLM 응답의 [변수] 블록을 파싱해 내레이션과 분리한다."""
+    _write_caption_template(tmp_path)
+    from app.services import llm
+
+    monkeypatch.setattr(
+        llm,
+        "_generate_response",
+        lambda prompt: "드디어 나왔다, 신메뉴!\n[변수]\nmenu_name: 매운 떡볶이",
+    )
+    response = client.post(
+        "/api/v1/promo/scripts", json={"template_id": "api-caption-v2"}
+    )
+    assert response.status_code == 200, response.text
+    data = response.json()
+    assert data["script"] == "드디어 나왔다, 신메뉴!"  # 내레이션만
+    assert data["variables"] == {"menu_name": "매운 떡볶이"}
+
+
+def test_generate_script_v1_has_empty_variables(client, monkeypatch):
+    """v1 템플릿은 변수 블록 없이 내레이션만 — variables 는 빈 dict."""
+    from app.services import llm
+
+    monkeypatch.setattr(llm, "_generate_response", lambda prompt: "그냥 내레이션.")
+    response = client.post(
+        "/api/v1/promo/scripts", json={"template_id": "api-test-v1"}
+    )
+    data = response.json()
+    assert data["script"] == "그냥 내레이션."
+    assert data["variables"] == {}
+
+
 def _make_rendered_plan(client, tmp_path):
     """플랜을 생성하고 DB 직접 조작으로 rendered 상태 + 실존 산출물을 만든다."""
     plan = _create_plan(client)

@@ -131,3 +131,90 @@ def test_hidden_headline_is_not_prompted(kit):
 
     assert "숨김 배너" not in prompt
     assert "화면 헤드라인" not in prompt
+
+
+# --- 템플릿 변수: 프롬프트가 [변수] 블록을 요구하고 응답을 파싱하는가 ---------
+
+from app.promo.research import VARIABLES_MARKER, parse_script_response  # noqa: E402
+
+V2_VARS_TEMPLATE = {
+    "template_id": "hint-vars-v2",
+    "name": "변수 힌트 테스트",
+    "version": 2,
+    "mood": "upbeat",
+    "structure": [
+        {
+            "role": "hook",
+            "duration_s": 3,
+            "script_guide": "훅",
+            "material_slot": "any",
+            "headline": {"template": "{shop_name} {menu_name} 출시!", "show": True},
+        },
+        {"role": "cta", "duration_s": 8, "script_guide": "cta", "material_slot": "any"},
+    ],
+    "total_duration_range": [10, 15],
+    "caption_template": "{shop_name} 신메뉴 '{menu_name}' 출시! {highlight}",
+    "hashtags_base": ["테스트"],
+}
+
+
+def test_prompt_requests_variables_block_when_required(kit):
+    """동적 변수가 필요한 템플릿은 프롬프트가 [변수] 블록과 항목을 요구한다."""
+    prompt = build_script_prompt(validate_template(V2_VARS_TEMPLATE), kit)
+
+    assert VARIABLES_MARKER in prompt
+    assert "- menu_name" in prompt
+    assert "- highlight" in prompt
+    # 변수 의미를 유추할 맥락(캡션/헤드라인 템플릿)을 함께 제시한다
+    assert "캡션 템플릿 참고" in prompt
+    assert "{shop_name} {menu_name} 출시!" in prompt  # 헤드라인 참고
+    # shop_name 은 브랜드킷 키라 요구 항목이 아니다
+    assert "- shop_name" not in prompt
+
+
+def test_prompt_omits_variables_block_when_not_required(template, kit):
+    """변수 불필요 템플릿은 기존처럼 '내레이션만' 지시 (하위호환)."""
+    prompt = build_script_prompt(template, kit)
+
+    assert VARIABLES_MARKER not in prompt
+    assert "내레이션 문장만" in prompt
+
+
+def test_parse_script_response_splits_narration_and_variables():
+    text = (
+        "드디어 나왔다, 신메뉴! 매콤합니다.\n"
+        "[변수]\n"
+        "menu_name: 매운 떡볶이\n"
+        "highlight: 20% 할인"
+    )
+
+    narration, variables = parse_script_response(text, ["menu_name", "highlight"])
+
+    assert narration == "드디어 나왔다, 신메뉴! 매콤합니다."
+    assert variables == {"menu_name": "매운 떡볶이", "highlight": "20% 할인"}
+
+
+def test_parse_script_response_no_marker_returns_empty_variables():
+    """[변수] 블록이 없으면(구형 응답) 전체가 내레이션, 변수는 비운다."""
+    narration, variables = parse_script_response("그냥 내레이션입니다.", ["menu_name"])
+
+    assert narration == "그냥 내레이션입니다."
+    assert variables == {}
+
+
+def test_parse_script_response_ignores_unknown_and_empty():
+    """required 에 없는 키(주입 방어)와 빈 값은 무시한다."""
+    text = "[변수]\nmenu_name: 매운 떡볶이\nevil: 주입\nhighlight:   "
+
+    narration, variables = parse_script_response(text, ["menu_name", "highlight"])
+
+    assert narration == ""
+    assert variables == {"menu_name": "매운 떡볶이"}  # evil/빈 highlight 제외
+
+
+def test_parse_script_response_tolerates_bullets_and_quotes():
+    text = "[변수]\n- menu_name: \"매운 떡볶이\"\n* highlight: 20% 할인"
+
+    _, variables = parse_script_response(text, ["menu_name", "highlight"])
+
+    assert variables == {"menu_name": "매운 떡볶이", "highlight": "20% 할인"}
