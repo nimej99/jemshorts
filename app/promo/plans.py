@@ -122,6 +122,7 @@ def save_plan(conn: sqlite3.Connection, plan: RenderPlan, template_raw: dict) ->
         # 실측 타임라인은 재측정하면 값이 흔들린다 — 승인 시점 값을 그대로 보존한다.
         "narration": _narration_to_dict(plan.narration) if plan.narration else None,
         "timeline": _gate_to_dict(plan.timeline) if plan.timeline else None,
+        "variables": dict(plan.variables),
     }
     conn.execute(
         "INSERT INTO promo_plans (plan_id, status, template_id, payload_json) "
@@ -169,6 +170,7 @@ def restore_plan(row: sqlite3.Row) -> RenderPlan:
         timeline=(
             _gate_from_dict(payload["timeline"]) if payload.get("timeline") else None
         ),
+        variables=dict(payload.get("variables") or {}),
     )
 
 
