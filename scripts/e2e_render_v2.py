@@ -19,6 +19,7 @@ ffmpeg/ffprobe. 없으면 크게 실패한다 (조용한 스킵 금지 — 검�
 실행: uv run python scripts/e2e_render_v2.py
 """
 
+import glob
 import hashlib
 import json
 import os
@@ -30,7 +31,7 @@ ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT_DIR)
 
 from app.promo.brandkit.models import BrandKit  # noqa: E402
-from app.promo.pipeline import execute_render, plan_render  # noqa: E402
+from app.promo.pipeline import execute_render, plan_render, upload_caption  # noqa: E402
 from app.promo.templates import load_template  # noqa: E402
 from app.utils import utils  # noqa: E402
 
@@ -113,13 +114,17 @@ def main() -> int:
 
     local_videos_dir = utils.storage_dir("local_videos", create=True)
 
-    # 1. 실측 플랜 (실제 edge-tts 1회 합성)
-    plan = plan_render(template, brandkit, [], KOREAN_SCRIPT, local_videos_dir)
+    # 1. 실측 플랜 (실제 edge-tts 1회 합성) + 동적 변수 주입
+    variables = {"menu_name": "매운 떡볶이", "highlight": "첫 주문 20% 할인"}
+    plan = plan_render(
+        template, brandkit, [], KOREAN_SCRIPT, local_videos_dir, variables=variables
+    )
     assert plan.narration is not None, "내레이션 실측이 없습니다"
     assert plan.timeline is not None and plan.timeline.passed, (
         f"타임라인 게이트 실패: {plan.timeline.failures}"
     )
     assert plan.approved_ready, f"승인 불가: {plan.structural.failures}"
+    assert plan.variables == variables, "플랜에 변수가 실리지 않았습니다"
 
     narration = plan.narration
     print(
@@ -169,6 +174,22 @@ def main() -> int:
     assert sig_cutin != sig_body, "hook 컷인과 body 가 같은 화면입니다"
     print("컷 전환 검증: hook-wide != hook-cutin != body")
 
+    # 5. 동적 변수가 캡션으로 흐르는지 (upload_caption 이 subject 가 아닌 채워진
+    #    caption_template 을 반환해야 한다 — 변수 엔진 종단 검증).
+    caption = upload_caption(plan, brandkit)
+    assert "매운 떡볶이" in caption and "첫 주문 20% 할인" in caption, (
+        f"캡션에 변수가 안 채워졌습니다: {caption}"
+    )
+    assert "{menu_name}" not in caption, f"캡션에 원문 플레이스홀더: {caption}"
+    print(f"캡션 검증: {caption}")
+
+    # 6. 헤드라인 배너 PNG 가 실제로 생성됐는지 (hook/cta 에 배너 선언).
+    banners = sorted(
+        glob.glob(os.path.join(local_videos_dir, f"headline-{plan.plan_id}-*.png"))
+    )
+    assert banners, "헤드라인 배너 PNG 가 생성되지 않았습니다"
+    print(f"헤드라인 배너 {len(banners)}개 생성: {[os.path.basename(b) for b in banners]}")
+
     report = {
         "plan_id": plan.plan_id,
         "task_id": result.task_id,
@@ -179,6 +200,8 @@ def main() -> int:
         "output_duration_s": round(output_duration, 2),
         "audio_reuse_drift_s": round(reuse_drift, 2),
         "clip_seconds": plan.clip_seconds,
+        "caption": caption,
+        "headline_banners": len(banners),
         "timeline_gate": {
             "passed": plan.timeline.passed,
             "failures": plan.timeline.failures,
