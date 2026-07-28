@@ -121,3 +121,86 @@ def test_page_renders_v2_narration_panel(isolated_env, monkeypatch):
     assert any("실측 총 길이 11초" in c.value for c in at.caption)
     assert any("클립 3개" in c.value for c in at.caption)
     assert at.dataframe  # 섹션별 목표/실측/편차 테이블
+
+
+UI_VARS_TEMPLATE = {
+    "template_id": "ui-vars-v2",
+    "name": "UI 변수 테스트",
+    "version": 2,
+    "mood": "upbeat",
+    "structure": [
+        {
+            "role": "hook",
+            "duration_s": 3,
+            "script_guide": "훅",
+            "material_slot": "any",
+            "headline": {"template": "{shop_name} {menu_name}!", "show": True},
+        },
+        {"role": "cta", "duration_s": 8, "script_guide": "cta", "material_slot": "any"},
+    ],
+    "total_duration_range": [10, 15],
+    "caption_template": "{shop_name} {menu_name} 출시",
+    "hashtags_base": ["테스트"],
+}
+
+
+def test_page_shows_variable_inputs_for_v2_template(isolated_env):
+    """동적 변수가 있는 v2 템플릿을 고르면 변수 입력란이 나타난다."""
+    conn = promo_db.connect()
+    try:
+        brandkit_store.save(conn, BrandKit(business_name="우리가게", photos=["b.mp4"]))
+    finally:
+        conn.close()
+    (isolated_env / "templates-data" / "ui-vars-v2.json").write_text(
+        json.dumps(UI_VARS_TEMPLATE, ensure_ascii=False), encoding="utf-8"
+    )
+
+    at = AppTest.from_file(PAGE_PATH, default_timeout=15)
+    at.run()
+    at.selectbox[0].set_value("ui-vars-v2").run()
+
+    assert not at.exception
+    # {menu_name} 변수 입력란이 렌더링된다 (라벨에 플레이스홀더명)
+    assert any("menu_name" in (ti.label or "") for ti in at.text_input)
+
+
+def test_page_shows_clip_preview_and_used_variables(isolated_env, monkeypatch):
+    """플랜에 material_paths/variables 가 있으면 클립 미리보기 + 변수 캡션이 그려진다."""
+    conn = promo_db.connect()
+    try:
+        brandkit_store.save(conn, BrandKit(business_name="우리가게", photos=["b.mp4"]))
+    finally:
+        conn.close()
+
+    canned_plan = {
+        "plan_id": "v2-plan",
+        "template_id": "ui-test-v1",
+        "subject": "우리가게",
+        "materials": ["a.mp4", "b.mp4"],
+        "material_paths": ["/tmp/preview-a.mp4", "/tmp/preview-b.mp4"],
+        "used_brand_count": 1,
+        "photo_warning": False,
+        "structural_gate": {"passed": True, "failures": [], "warnings": []},
+        "approved_ready": True,
+        "template_version": 2,
+        "style_preset": "warm-food",
+        "narration": None,
+        "timeline_gate": None,
+        "clip_seconds": [3.0, 8.0],
+        "headlines": ["우리가게 신메뉴", None],
+        "variables": {"menu_name": "매운떡볶이"},
+        "required_variables": ["menu_name"],
+        "status": "planned",
+        "task_id": None,
+    }
+    monkeypatch.setattr(promo_api, "get_plan", lambda plan_id: canned_plan)
+
+    at = AppTest.from_file(PAGE_PATH, default_timeout=15)
+    at.session_state["promo_plan_id"] = "v2-plan"
+    at.run()
+
+    assert not at.exception
+    # 채워진 변수 캡션이 보인다
+    assert any("menu_name=매운떡볶이" in c.value for c in at.caption)
+    # 클립 미리보기 셀렉트박스 (템플릿 + 클립 = 2개)
+    assert len(at.selectbox) == 2

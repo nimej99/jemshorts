@@ -156,6 +156,10 @@ template_labels = {
     t["template_id"]: f"{t['name']} ({t['mood']}, {'/'.join(t['sections'])})"
     for t in templates
 }
+# 템플릿별 동적 변수 (캡션/헤드라인에 채워질 값 — LLM 생성 또는 직접 입력)
+template_vars = {
+    t["template_id"]: t.get("required_variables", []) for t in templates
+}
 template_id = st.selectbox(
     "템플릿 선택",
     options=list(template_labels),
@@ -204,6 +208,8 @@ with col_gen:
                     )
                 )
             st.session_state["promo_script"] = result["script"]
+            # LLM 이 스크립트와 함께 생성한 동적 변수를 변수 입력란에 미리 채운다.
+            st.session_state["promo_variables"] = result.get("variables", {})
         except HTTPException as exc:
             st.error(_detail(exc))
 with col_prompt:
@@ -226,12 +232,35 @@ script = st.text_area(
     height=140,
 )
 
+# ── 3-1. 템플릿 변수 (캡션/헤드라인에 채워질 동적 값) ─────────────────
+required_vars = template_vars.get(template_id, [])
+edited_vars: dict[str, str] = {}
+if required_vars:
+    st.markdown("**템플릿 변수** — 캡션/헤드라인 플레이스홀더에 채워집니다")
+    saved_vars = st.session_state.get("promo_variables", {})
+    var_cols = st.columns(min(len(required_vars), 3))
+    for index, name in enumerate(required_vars):
+        with var_cols[index % len(var_cols)]:
+            edited_vars[name] = st.text_input(
+                f"`{{{name}}}`",
+                value=saved_vars.get(name, ""),
+                key=f"promo_var_{name}",
+            )
+    st.caption(
+        "LLM 스크립트 생성 시 자동 채워집니다. 비어 있으면 해당 헤드라인은 "
+        "생략되고 캡션은 가게명 폴백 — 원문 `{...}` 이 공개되지 않습니다."
+    )
+
 # ── 4. 플랜 (승인 게이트) ────────────────────────────────────────────
 st.header("4. 플랜 — 승인 게이트")
 if st.button("플랜 생성", type="primary", disabled=not script.strip()):
     try:
         plan = promo_api.create_plan(
-            promo_api.PlanCreateRequest(template_id=template_id, script=script)
+            promo_api.PlanCreateRequest(
+                template_id=template_id,
+                script=script,
+                variables={k: v.strip() for k, v in edited_vars.items() if v.strip()},
+            )
         )
         st.session_state["promo_plan_id"] = plan["plan_id"]
     except HTTPException as exc:
@@ -276,6 +305,36 @@ if plan_id:
         _render_narration_panel(narration, timeline_gate, plan)
 
     st.caption("소재 배치: " + " → ".join(plan["materials"]))
+
+    used_vars = plan.get("variables") or {}
+    if used_vars:
+        st.caption(
+            "채워진 변수: " + ", ".join(f"{k}={v}" for k, v in used_vars.items())
+        )
+
+    # 소재 클립 미리보기 — 컷 분할·헤드라인이 반영된 실제 소재를 렌더 전에 본다
+    # (승인한 것 = 렌더되는 것).
+    material_paths = plan.get("material_paths", [])
+    clip_seconds = plan.get("clip_seconds", [])
+    if material_paths:
+        st.markdown("**소재 클립 미리보기** (컷 분할·헤드라인 반영됨)")
+
+        def _clip_label(idx: int) -> str:
+            base = os.path.basename(material_paths[idx])
+            secs = f" ({clip_seconds[idx]:g}초)" if idx < len(clip_seconds) else ""
+            return f"{idx + 1}. {base}{secs}"
+
+        selected = st.selectbox(
+            "미리볼 클립",
+            options=list(range(len(material_paths))),
+            format_func=_clip_label,
+            key="promo_clip_preview",
+        )
+        preview_path = material_paths[selected]
+        if os.path.exists(preview_path):
+            st.video(preview_path)
+        else:
+            st.caption(f"클립 파일이 없습니다: {os.path.basename(preview_path)}")
 
     # ── 5. 렌더 ──────────────────────────────────────────────────────
     st.header("5. 렌더")

@@ -150,6 +150,9 @@ def _plan_summary(plan: pipeline.RenderPlan, headlines: list[str | None] | None 
         "template_id": plan.template.template_id,
         "subject": plan.subject,
         "materials": [os.path.basename(m.url) for m in plan.materials],
+        # 리타이밍된 클립의 전체 경로 — 승인 UI 가 컷/헤드라인이 반영된 실제
+        # 소재를 렌더 전에 미리보는 데 쓴다 (승인한 것 = 렌더되는 것).
+        "material_paths": [m.url for m in plan.materials],
         "used_brand_count": plan.used_brand_count,
         "photo_warning": plan.photo_warning,
         "structural_gate": _gate_dict(plan.structural),
