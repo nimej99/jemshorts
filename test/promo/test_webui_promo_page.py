@@ -204,3 +204,49 @@ def test_page_shows_clip_preview_and_used_variables(isolated_env, monkeypatch):
     assert any("menu_name=매운떡볶이" in c.value for c in at.caption)
     # 클립 미리보기 셀렉트박스 (템플릿 + 클립 = 2개)
     assert len(at.selectbox) == 2
+
+
+def test_page_shows_caption_preview_and_missing_variables_warning(
+    isolated_env, monkeypatch
+):
+    """승인 패널에 업로드 캡션 미리보기 + 미충전 변수 경고가 그려진다."""
+    conn = promo_db.connect()
+    try:
+        brandkit_store.save(conn, BrandKit(business_name="우리가게", photos=["b.mp4"]))
+    finally:
+        conn.close()
+
+    canned_plan = {
+        "plan_id": "v2-plan",
+        "template_id": "ui-test-v1",
+        "subject": "우리가게",
+        "materials": ["a.mp4"],
+        "material_paths": [],
+        "used_brand_count": 1,
+        "photo_warning": False,
+        "structural_gate": {"passed": True, "failures": [], "warnings": []},
+        "approved_ready": True,
+        "template_version": 2,
+        "style_preset": "warm-food",
+        "narration": None,
+        "timeline_gate": None,
+        "clip_seconds": [3.0],
+        "headlines": [None],
+        "variables": {},
+        "required_variables": ["menu_name"],
+        "missing_variables": ["menu_name"],
+        "upload_caption": "우리가게 — UI 테스트",
+        "status": "planned",
+        "task_id": None,
+    }
+    monkeypatch.setattr(promo_api, "get_plan", lambda plan_id: canned_plan)
+
+    at = AppTest.from_file(PAGE_PATH, default_timeout=15)
+    at.session_state["promo_plan_id"] = "v2-plan"
+    at.run()
+
+    assert not at.exception
+    # 미충전 변수 경고
+    assert any("미충전 변수" in w.value and "menu_name" in w.value for w in at.warning)
+    # 업로드 캡션 미리보기
+    assert any("우리가게 — UI 테스트" in i.value for i in at.info)
