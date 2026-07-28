@@ -38,6 +38,9 @@ from app.utils import utils
 MAX_FREQ_PER_WEEK = 21
 # missed_runs 무한 적재 방지 (최근 것만 유지)
 MAX_MISSED_KEPT = 50
+# 스크립트가 템플릿 길이에 안 맞아 타임라인 게이트가 실패하면 재생성 재시도
+# (구조 게이트 실패는 스크립트와 무관하므로 재시도하지 않는다).
+MAX_SCRIPT_ATTEMPTS = 3
 
 
 class SchedulerError(RuntimeError):
@@ -195,22 +198,57 @@ def run_autopilot_once(conn: sqlite3.Connection) -> dict:
     prompt = build_script_prompt(template, kit, trend_keywords=trend_keywords or None)
     from app.services import llm  # 지연 임포트
 
-    response = llm._generate_response(prompt)
-    raw_response = (response or "").strip()
-    if not raw_response or raw_response.startswith("Error:"):
-        raise SchedulerError(f"스크립트 생성 실패: {raw_response or '빈 응답'}")
-    # 템플릿이 동적 변수를 요구하면 [변수] 블록을 파싱해 플랜에 싣는다 —
-    # 캡션/헤드라인이 실제 값으로 채워진 채 자동 업로드까지 간다.
-    script, variables = parse_script_response(
-        raw_response, required_variables(template)
-    )
-    if not script:
-        raise SchedulerError("스크립트 생성 실패: 내레이션이 비어 있습니다")
-
+    required = required_variables(template)
     local_dir = utils.storage_dir("local_videos", create=True)
-    plan = pipeline.plan_render(template, kit, [], script, local_dir, variables=variables)
+    base_prompt = prompt
+    lo, hi = template.total_duration_range
+
+    # 스크립트 생성 -> 실측 플랜. 타임라인 게이트(길이) 실패 시 분량 힌트를 더해
+    # 재생성 재시도. 구조 게이트 실패는 재시도 무의미(소재/역할 문제).
+    plan = None
+    attempt_prompt = base_prompt
+    for attempt in range(1, MAX_SCRIPT_ATTEMPTS + 1):
+        response = llm._generate_response(attempt_prompt)
+        raw_response = (response or "").strip()
+        if not raw_response or raw_response.startswith("Error:"):
+            raise SchedulerError(f"스크립트 생성 실패: {raw_response or '빈 응답'}")
+        # [변수] 블록 파싱 — 캡션/헤드라인이 실제 값으로 채워진 채 업로드까지 간다.
+        script, variables = parse_script_response(raw_response, required)
+        if not script:
+            raise SchedulerError("스크립트 생성 실패: 내레이션이 비어 있습니다")
+
+        missing = [n for n in required if not str(variables.get(n, "")).strip()]
+        if missing:
+            logger.warning(
+                f"autopilot: LLM 이 동적 변수를 다 채우지 못함: {missing} "
+                "(헤드라인 생략/캡션 폴백 예정)"
+            )
+
+        plan = pipeline.plan_render(
+            template, kit, [], script, local_dir, variables=variables
+        )
+
+        if not plan.structural.passed:
+            raise SchedulerError(f"사전 구조 게이트 실패: {plan.structural.failures}")
+        if plan.timeline is None or plan.timeline.passed:
+            break
+        logger.warning(
+            f"autopilot: 타임라인 게이트 실패 (시도 {attempt}/{MAX_SCRIPT_ATTEMPTS}): "
+            f"{plan.timeline.failures}"
+        )
+        attempt_prompt = (
+            base_prompt
+            + f"\n\n[재시도 안내] 이전 내레이션이 템플릿 길이 범위({lo:g}~{hi:g}초)를 "
+            "벗어났습니다. 섹션별 분량을 조절해 다시 작성하세요."
+        )
+    else:
+        raise SchedulerError(
+            f"타임라인 게이트가 {MAX_SCRIPT_ATTEMPTS}회 시도에도 통과하지 못함: "
+            f"{plan.timeline.failures if plan and plan.timeline else []}"
+        )
+
     if not plan.approved_ready:
-        raise SchedulerError(f"사전 구조 게이트 실패: {plan.structural.failures}")
+        raise SchedulerError(f"사전 게이트 실패: {plan.structural.failures}")
     plans.save_plan(conn, plan, raw)
 
     task_id = f"promo-auto-{plan.plan_id}-{uuid.uuid4().hex[:6]}"
