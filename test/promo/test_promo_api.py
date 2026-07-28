@@ -938,3 +938,28 @@ def test_upload_description_falls_back_to_subject_without_variables(
     assert response.status_code == 200, response.text
     assert "{menu_name}" not in captured["description"]  # 원문이 공개되면 안 된다
     assert "캡션 테스트" in captured["description"]  # subject(가게 — 템플릿명) 폴백
+
+
+def test_create_plan_summary_includes_caption_and_missing_variables(client, tmp_path):
+    """플랜 요약에 업로드 캡션 미리보기 + 미충전 변수가 노출된다."""
+    _write_caption_template(tmp_path)
+
+    # 변수 충전 → 캡션이 caption_template 으로 채워지고 미충전 없음
+    filled = client.post(
+        "/api/v1/promo/plans",
+        json={
+            "template_id": "api-caption-v2",
+            "script": "훅. 행동 유도.",
+            "variables": {"menu_name": "매운떡볶이"},
+        },
+    ).json()
+    assert filled["upload_caption"] == "우리가게 신메뉴 '매운떡볶이' 출시!"
+    assert filled["missing_variables"] == []
+
+    # 변수 없음 → 캡션은 subject 폴백(원문 금지), 미충전 변수 노출
+    missing = client.post(
+        "/api/v1/promo/plans",
+        json={"template_id": "api-caption-v2", "script": "훅. 행동 유도."},
+    ).json()
+    assert missing["missing_variables"] == ["menu_name"]
+    assert "{menu_name}" not in missing["upload_caption"]

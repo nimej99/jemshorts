@@ -312,6 +312,18 @@ if plan_id:
             "채워진 변수: " + ", ".join(f"{k}={v}" for k, v in used_vars.items())
         )
 
+    missing_vars = plan.get("missing_variables") or []
+    if missing_vars:
+        st.warning(
+            "미충전 변수: " + ", ".join(missing_vars)
+            + " — 해당 헤드라인은 생략되고 캡션은 가게명으로 폴백됩니다."
+        )
+
+    upload_caption = plan.get("upload_caption")
+    if upload_caption:
+        st.markdown("**업로드 캡션 미리보기**")
+        st.info(upload_caption)
+
     # 소재 클립 미리보기 — 컷 분할·헤드라인이 반영된 실제 소재를 렌더 전에 본다
     # (승인한 것 = 렌더되는 것).
     material_paths = plan.get("material_paths", [])

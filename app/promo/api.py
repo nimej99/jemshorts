@@ -144,7 +144,11 @@ def _narration_dict(narration) -> dict:
     }
 
 
-def _plan_summary(plan: pipeline.RenderPlan, headlines: list[str | None] | None = None) -> dict:
+def _plan_summary(
+    plan: pipeline.RenderPlan,
+    headlines: list[str | None] | None = None,
+    upload_caption: str | None = None,
+) -> dict:
     return {
         "plan_id": plan.plan_id,
         "template_id": plan.template.template_id,
@@ -167,6 +171,14 @@ def _plan_summary(plan: pipeline.RenderPlan, headlines: list[str | None] | None 
         # --- 템플릿 변수 ---
         "variables": dict(plan.variables),
         "required_variables": required_variables(plan.template),
+        # 못 채운 동적 변수 — 헤드라인 생략/캡션 폴백의 원인. 승인 UI 가 경고한다.
+        "missing_variables": [
+            name
+            for name in required_variables(plan.template)
+            if not str(plan.variables.get(name, "")).strip()
+        ],
+        # 업로드될 실제 캡션 (caption_template 충전 또는 subject 폴백).
+        "upload_caption": upload_caption,
     }
 
 
@@ -180,6 +192,15 @@ def _headlines_for(plan: pipeline.RenderPlan) -> list[str | None] | None:
     except HTTPException:
         return None
     return pipeline.headline_texts(plan.template, kit, plan.variables)
+
+
+def _upload_caption_for(plan: pipeline.RenderPlan) -> str | None:
+    """업로드 캡션을 미리 계산한다 (best-effort). 브랜드킷 없으면 None."""
+    try:
+        kit = _load_brandkit()
+    except HTTPException:
+        return None
+    return pipeline.upload_caption(plan, kit)
 
 
 @router.get("/templates")
@@ -230,7 +251,11 @@ def create_plan(body: PlanCreateRequest):
         plans.save_plan(conn, plan, raw)
     finally:
         conn.close()
-    return _plan_summary(plan, headlines=pipeline.headline_texts(template, kit))
+    return _plan_summary(
+        plan,
+        headlines=pipeline.headline_texts(template, kit),
+        upload_caption=pipeline.upload_caption(plan, kit),
+    )
 
 
 def _run_render(plan_id: str, task_id: str) -> None:
@@ -300,7 +325,9 @@ def get_plan(plan_id: str):
         raise HTTPException(status_code=404, detail=f"플랜이 없습니다: {plan_id}")
 
     plan = plans.restore_plan(row)
-    response = _plan_summary(plan, headlines=_headlines_for(plan))
+    response = _plan_summary(
+        plan, headlines=_headlines_for(plan), upload_caption=_upload_caption_for(plan)
+    )
     response["status"] = row["status"]
     response["task_id"] = row["task_id"]
     if row["result_json"]:
