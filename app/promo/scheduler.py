@@ -232,7 +232,9 @@ def run_autopilot_once(conn: sqlite3.Connection) -> dict:
         raise SchedulerError(f"기술 게이트 실패: {result.technical.failures}")
 
     hashtags = [f"#{tag}" for tag in template.hashtags_base]
-    description = f"{plan.subject}\n\n{' '.join(hashtags)}"
+    # caption_template 을 채워 쓰되 못 채운 값이 있으면 subject 로 폴백
+    # (자동 공개 캡션에 `{menu_name}` 원문이 찍히면 안 된다).
+    description = f"{pipeline.upload_caption(plan, kit)}\n\n{' '.join(hashtags)}"
     from app.promo import publish  # 지연 임포트
 
     upload_result = publish.publish_video(

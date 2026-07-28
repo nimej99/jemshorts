@@ -779,3 +779,130 @@ def test_v1_plan_summary_has_no_narration(client):
     assert plan["narration"] is None
     assert plan["timeline_gate"] is None
     assert plan["clip_seconds"] == []
+
+
+# ---------------------------------------------------------------------------
+# 템플릿 변수 (caption_template 소비 + required_variables 노출)
+# ---------------------------------------------------------------------------
+
+CAPTION_TEMPLATE_DATA = {
+    "template_id": "api-caption-v2",
+    "name": "캡션 테스트",
+    "version": 2,
+    "mood": "upbeat",
+    "structure": [
+        {"role": "hook", "duration_s": 3, "script_guide": "훅", "material_slot": "any"},
+        {"role": "cta", "duration_s": 8, "script_guide": "cta", "material_slot": "any"},
+    ],
+    "total_duration_range": [10, 15],
+    "caption_template": "{shop_name} 신메뉴 '{menu_name}' 출시!",
+    "hashtags_base": ["테스트"],
+}
+
+
+def _write_caption_template(tmp_path):
+    (tmp_path / "templates-data" / "api-caption-v2.json").write_text(
+        json.dumps(CAPTION_TEMPLATE_DATA, ensure_ascii=False), encoding="utf-8"
+    )
+
+
+def _make_rendered_v2_plan(client, tmp_path, variables):
+    _write_caption_template(tmp_path)
+    response = client.post(
+        "/api/v1/promo/plans",
+        json={"template_id": "api-caption-v2", "script": "훅. 행동 유도.", "variables": variables},
+    )
+    assert response.status_code == 200, response.text
+    plan = response.json()
+    video = tmp_path / f"final-{plan['plan_id']}.mp4"
+    video.write_bytes(b"x")
+    conn = promo_db.connect()
+    try:
+        plans.mark_rendering(conn, plan["plan_id"], f"task-{plan['plan_id']}")
+        plans.finish(
+            conn,
+            plan["plan_id"],
+            plans.STATUS_RENDERED,
+            {
+                "task_id": f"task-{plan['plan_id']}",
+                "videos": [str(video)],
+                "render_seconds": 1.0,
+                "technical_gate": {"passed": True, "failures": [], "warnings": []},
+                "warnings": [],
+            },
+        )
+    finally:
+        conn.close()
+    return plan
+
+
+def test_list_templates_includes_version_and_required_variables(client, tmp_path):
+    _write_caption_template(tmp_path)
+
+    templates = client.get("/api/v1/promo/templates").json()["templates"]
+    by_id = {t["template_id"]: t for t in templates}
+
+    assert by_id["api-test-v1"]["version"] == 1
+    assert by_id["api-test-v1"]["required_variables"] == []
+    assert by_id["api-caption-v2"]["version"] == 2
+    # caption_template 의 {shop_name} 은 브랜드킷 키라 빠지고 {menu_name} 만 동적 변수
+    assert by_id["api-caption-v2"]["required_variables"] == ["menu_name"]
+
+
+def test_create_plan_summary_includes_variables(client, tmp_path):
+    _write_caption_template(tmp_path)
+
+    response = client.post(
+        "/api/v1/promo/plans",
+        json={
+            "template_id": "api-caption-v2",
+            "script": "훅. 행동 유도.",
+            "variables": {"menu_name": "매운떡볶이"},
+        },
+    )
+    plan = response.json()
+
+    assert plan["variables"] == {"menu_name": "매운떡볶이"}
+    assert plan["required_variables"] == ["menu_name"]
+
+
+def test_upload_description_uses_filled_caption(client, monkeypatch, tmp_path):
+    """변수가 채워지면 caption_template 가 업로드 설명으로 쓰인다."""
+    from app.promo import publish
+
+    captured = {}
+    monkeypatch.setattr(
+        publish,
+        "publish_video",
+        lambda video, title, description, tags, **kw: captured.update(description=description)
+        or {"success": True, "request_id": "req-cap"},
+    )
+
+    plan = _make_rendered_v2_plan(client, tmp_path, {"menu_name": "매운떡볶이"})
+    response = client.post(f"/api/v1/promo/plans/{plan['plan_id']}/upload", json={})
+
+    assert response.status_code == 200, response.text
+    assert "우리가게 신메뉴 '매운떡볶이' 출시!" in captured["description"]
+    assert "{menu_name}" not in captured["description"]
+
+
+def test_upload_description_falls_back_to_subject_without_variables(
+    client, monkeypatch, tmp_path
+):
+    """변수가 없어 캡션에 원문이 남으면 공개 캡션 대신 안전한 subject 로 폴백."""
+    from app.promo import publish
+
+    captured = {}
+    monkeypatch.setattr(
+        publish,
+        "publish_video",
+        lambda video, title, description, tags, **kw: captured.update(description=description)
+        or {"success": True, "request_id": "req-cap"},
+    )
+
+    plan = _make_rendered_v2_plan(client, tmp_path, {})
+    response = client.post(f"/api/v1/promo/plans/{plan['plan_id']}/upload", json={})
+
+    assert response.status_code == 200, response.text
+    assert "{menu_name}" not in captured["description"]  # 원문이 공개되면 안 된다
+    assert "캡션 테스트" in captured["description"]  # subject(가게 — 템플릿명) 폴백

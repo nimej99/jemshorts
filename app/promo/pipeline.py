@@ -83,6 +83,9 @@ class RenderPlan:
     # 실측에 쓴 전체 스크립트 오디오 (같은 프로세스에서 렌더로 이어질 때 재사용).
     # 영속화하지 않는다 — sub_maker 는 직렬화 대상이 아니다.
     narration_audio: NarrationAudio | None = None
+    # 영상마다 다른 동적 값 (menu_name, event_name, ...). LLM/호출자가 제공하며
+    # caption_template · headline 을 채우는 데 쓴다. 영속화된다.
+    variables: dict = field(default_factory=dict)
 
     @property
     def approved_ready(self) -> bool:
@@ -142,6 +145,7 @@ def plan_render(
     language: str = DEFAULT_LANGUAGE,
     measure: MeasureFn | None = None,
     retime: Callable[..., list[RetimedClip]] | None = None,
+    variables: dict | None = None,
 ) -> RenderPlan:
     """소재를 합성하고 사전 구조 게이트까지 판정한 RenderPlan 을 만든다.
 
@@ -205,7 +209,7 @@ def plan_render(
             narration,
             storage_local_dir,
             shots=[section.shots for section in template.structure],
-            headlines=headline_texts(template, brandkit),
+            headlines=headline_texts(template, brandkit, variables),
             retime_id=plan_id,
         )
         materials = [clip.material for clip in clips]
@@ -228,6 +232,7 @@ def plan_render(
         narration_audio=narration_audio,
         clip_seconds=clip_seconds,
         timeline=timeline,
+        variables=dict(variables or {}),
     )
 
 
@@ -276,20 +281,18 @@ def build_voice_preview(plan: RenderPlan, task_id: str) -> dict | None:
     }
 
 
-def headline_texts(template: Template, brandkit: BrandKit) -> list[str | None]:
-    """섹션별 헤드라인 문구를 브랜드 정보로 채운다 (show=false 면 None).
+def headline_texts(
+    template: Template, brandkit: BrandKit, variables: dict | None = None
+) -> list[str | None]:
+    """섹션별 헤드라인 문구를 브랜드 정보 + 동적 변수로 채운다 (show=false 면 None).
 
     채우지 못한 플레이스홀더는 `{menu_name}` 처럼 원문이 남는다 — 운영자가
     승인 화면에서 "무엇이 안 채워졌는지" 바로 본다 (조용한 빈칸 금지).
     """
     from app.promo.materials.headline import format_headline
+    from app.promo.templates.variables import template_context
 
-    context = {
-        "shop_name": brandkit.business_name,
-        "business_name": brandkit.business_name,
-        "category": brandkit.category or "",
-        "template_name": template.name,
-    }
+    context = template_context(template, brandkit, variables)
     texts: list[str | None] = []
     for section in template.structure:
         headline = section.headline
@@ -298,6 +301,19 @@ def headline_texts(template: Template, brandkit: BrandKit) -> list[str | None]:
             continue
         texts.append(format_headline(headline.template, context))
     return texts
+
+
+def upload_caption(plan: "RenderPlan", brandkit: BrandKit) -> str:
+    """업로드 설명 본문. `caption_template` 을 채우되 못 채운 값이 있으면
+    `plan.subject` 로 폴백한다.
+
+    자동(스케줄러)으로 공개되는 캡션에 `{menu_name}` 같은 원문이 찍히면
+    안 되므로, unfilled 가 하나라도 있으면 안전한 subject 로 물러선다.
+    """
+    from app.promo.templates.variables import render_caption
+
+    caption, unfilled = render_caption(plan.template, brandkit, plan.variables)
+    return plan.subject if unfilled else caption
 
 
 def build_video_params(plan: RenderPlan, *, n_threads: int = 1) -> VideoParams:

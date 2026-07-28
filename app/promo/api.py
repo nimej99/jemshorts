@@ -44,6 +44,7 @@ from app.promo.templates.schema import (
     load_all_raw,
     validate_template,
 )
+from app.promo.templates.variables import required_variables
 from app.utils import utils
 
 router = APIRouter(prefix="/api/v1/promo", tags=["Promo"])
@@ -90,6 +91,7 @@ class PlanCreateRequest(BaseModel):
     stock_paths: list[str] = Field(default_factory=list)
     voice_name: str = pipeline.DEFAULT_VOICE_NAME
     font_name: str = pipeline.DEFAULT_FONT_NAME
+    variables: dict[str, str] = Field(default_factory=dict)
 
 
 class RenderRequest(BaseModel):
@@ -157,6 +159,9 @@ def _plan_summary(plan: pipeline.RenderPlan, headlines: list[str | None] | None 
         "timeline_gate": _gate_dict(plan.timeline) if plan.timeline else None,
         "clip_seconds": [round(s, 3) for s in plan.clip_seconds],
         "headlines": headlines,
+        # --- 템플릿 변수 ---
+        "variables": dict(plan.variables),
+        "required_variables": required_variables(plan.template),
     }
 
 
@@ -169,7 +174,7 @@ def _headlines_for(plan: pipeline.RenderPlan) -> list[str | None] | None:
         kit = _load_brandkit()
     except HTTPException:
         return None
-    return pipeline.headline_texts(plan.template, kit)
+    return pipeline.headline_texts(plan.template, kit, plan.variables)
 
 
 @router.get("/templates")
@@ -184,8 +189,10 @@ def list_templates():
                 "template_id": raw["template_id"],
                 "name": raw["name"],
                 "mood": raw["mood"],
+                "version": raw.get("version", 1),
                 "total_duration_range": raw["total_duration_range"],
                 "sections": [s["role"] for s in raw["structure"]],
+                "required_variables": required_variables(validate_template(raw)),
             }
             for raw in raws
         ]
@@ -208,6 +215,7 @@ def create_plan(body: PlanCreateRequest):
             local_dir,
             voice_name=body.voice_name,
             font_name=body.font_name,
+            variables=body.variables,
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
@@ -476,7 +484,16 @@ def upload_plan(plan_id: str, body: UploadRequest | None = None):
         plan = plans.restore_plan(row)
         hashtags = [f"#{tag}" for tag in plan.template.hashtags_base]
         title = body.title or plan.subject
-        description = body.description or f"{plan.subject}\n\n{' '.join(hashtags)}"
+        if body.description:
+            description = body.description
+        else:
+            # caption_template 을 채워 쓰되, 못 채운 값이 있으면 subject 로 폴백
+            # (공개 캡션에 `{menu_name}` 원문이 찍히면 안 된다).
+            try:
+                caption = pipeline.upload_caption(plan, _load_brandkit())
+            except HTTPException:
+                caption = plan.subject
+            description = f"{caption}\n\n{' '.join(hashtags)}"
 
         from app.promo import publish  # 지연 임포트
 

@@ -185,3 +185,39 @@ def test_legacy_material_urls_payload_still_restores(conn, plan):
 
     assert [m.url for m in restored.materials] == [m.url for m in plan.materials]
     assert all(m.duration == 0 for m in restored.materials)
+
+
+def test_variables_roundtrip(conn, tmp_path):
+    """플랜에 준 동적 변수가 저장-복원 후에도 그대로여야 캡션/헤드라인이 일관된다."""
+    local_dir = tmp_path / "local_videos_vars"
+    brand_dir = tmp_path / "brand_vars"
+    local_dir.mkdir()
+    brand_dir.mkdir()
+    clip = brand_dir / "b1.mp4"
+    clip.write_bytes(b"dummy")
+    template = validate_template(TEMPLATE_DATA)
+    kit = BrandKit(business_name="가게", photos=[str(clip)])
+    plan = plan_render(
+        template, kit, [], "테스트 스크립트입니다.", str(local_dir),
+        variables={"menu_name": "매운떡볶이"},
+    )
+
+    plans.save_plan(conn, plan, TEMPLATE_DATA)
+    restored = plans.restore_plan(plans.get_row(conn, plan.plan_id))
+
+    assert restored.variables == {"menu_name": "매운떡볶이"}
+
+
+def test_legacy_payload_without_variables_restores_empty(conn, plan):
+    """variables 키 없는 구버전 payload 도 빈 dict 로 복원된다."""
+    plans.save_plan(conn, plan, TEMPLATE_DATA)
+    row = plans.get_row(conn, plan.plan_id)
+    payload = json.loads(row["payload_json"])
+    payload.pop("variables", None)
+    conn.execute(
+        "UPDATE promo_plans SET payload_json = ? WHERE plan_id = ?",
+        (json.dumps(payload, ensure_ascii=False), plan.plan_id),
+    )
+    conn.commit()
+
+    assert plans.restore_plan(plans.get_row(conn, plan.plan_id)).variables == {}
