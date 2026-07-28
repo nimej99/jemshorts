@@ -32,8 +32,8 @@ BUNDLED_DIR = REPO_ROOT / "templates-data"
 
 SEED_IDS = {
     "upbeat-new-menu-v1",
-    "calm-space-mood-v1",
-    "energetic-event-sale-v1",
+    "calm-space-mood-v2",
+    "energetic-event-sale-v2",
     "upbeat-new-menu-v2",
 }
 
@@ -369,13 +369,13 @@ def test_v2_template_roundtrips_through_load_template(tmp_path):
 
 
 def test_bundled_seed_versions():
-    """v1 시드 3종은 하위호환 회귀 기준, v2 시드 1종은 신규 기능 시연용."""
+    """upbeat-new-menu-v1 만 하위호환 회귀 기준, 나머지 3종은 v2(실제 운영 템플릿)."""
     versions = {t.template_id: t.version for t in load_all(BUNDLED_DIR)}
 
     assert versions == {
         "upbeat-new-menu-v1": 1,
-        "calm-space-mood-v1": 1,
-        "energetic-event-sale-v1": 1,
+        "calm-space-mood-v2": 2,
+        "energetic-event-sale-v2": 2,
         "upbeat-new-menu-v2": 2,
     }
 
@@ -395,6 +395,36 @@ def test_v2_seed_exercises_full_feature_set():
     assert [shot.kind for shot in hook.shots] == ["wide", "cutin"]
     assert hook.headline is not None and hook.headline.show is True
     assert hook.feel
+
+
+def test_all_v2_seeds_declare_narration_timing_and_shots():
+    """v2 시드 3종 전부 실측 타이밍 + 컷인을 실제로 선언한다 (로테이션 품질 균일)."""
+    for template in load_all(BUNDLED_DIR):
+        if template.version < 2:
+            continue
+        assert template.timing is not None and template.timing.owner == "narration", (
+            f"{template.template_id}: timing.owner=narration 누락"
+        )
+        assert template.style_preset, f"{template.template_id}: style_preset 누락"
+        assert any(section.shots for section in template.structure), (
+            f"{template.template_id}: shots 를 쓰는 섹션이 없음"
+        )
+
+
+@pytest.mark.parametrize(
+    "filename, expected_vars",
+    [
+        ("upbeat-new-menu-v2.json", ["menu_name", "highlight"]),
+        ("calm-space-mood-v2.json", ["mood_point"]),
+        ("energetic-event-sale-v2.json", ["event_name", "benefit", "period"]),
+    ],
+)
+def test_v2_seeds_declare_dynamic_variables(filename, expected_vars):
+    """v2 시드의 캡션/헤드라인이 동적 변수를 선언 — LLM 이 채울 값이다."""
+    from app.promo.templates.variables import required_variables
+
+    template = load_template(BUNDLED_DIR / filename)
+    assert required_variables(template) == expected_vars
 
 
 @pytest.mark.parametrize(

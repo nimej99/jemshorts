@@ -1,26 +1,42 @@
 {
-  "template_id": "energetic-event-sale-v1",
-  "name": "이벤트/할인 공지 (범용)",
-  "version": 1,
+  "template_id": "energetic-event-sale-v2",
+  "name": "이벤트/할인 공지 v2 (범용)",
+  "version": 2,
   "mood": "energetic",
+  "style_preset": "bright-lifestyle",
+  "voice": { "speed": 1.05 },
+  "timing": { "owner": "narration", "tolerance_s": 0.2 },
   "structure": [
     {
       "role": "hook",
       "duration_s": 3,
       "script_guide": "할인율이나 혜택 숫자를 크게 외치며 시작하세요. 예: '전 품목 최대 30% 할인!'",
-      "material_slot": "any"
+      "material_slot": "any",
+      "headline": { "template": "{event_name}", "show": true },
+      "shots": [
+        { "kind": "wide", "motion": "push-in" },
+        { "kind": "cutin", "crop": "center-zoom", "motion": "drift" }
+      ],
+      "feel": "활기차고 긴박한"
     },
     {
       "role": "body",
       "duration_s": 10,
       "script_guide": "이벤트 기간, 대상 품목/서비스, 참여 방법을 빠른 컷 전환으로 하나씩 보여주세요.",
-      "material_slot": "any"
+      "material_slot": "any",
+      "headline": { "template": "{benefit}", "show": true },
+      "shots": [
+        { "kind": "wide" },
+        { "kind": "cutin", "crop": "left" }
+      ],
+      "feel": "신나는"
     },
     {
       "role": "cta",
       "duration_s": 5,
       "script_guide": "마감 임박을 강조하고 행동을 유도하세요. 예: '이번 주 일요일까지! 놓치면 후회해요.'",
-      "material_slot": "photo"
+      "material_slot": "photo",
+      "headline": { "template": "{period} 한정", "show": true }
     }
   ],
   "total_duration_range": [15, 30],

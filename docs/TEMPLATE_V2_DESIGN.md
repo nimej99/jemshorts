@@ -241,13 +241,24 @@ fps/width 커스텀(코어 고정 1080x1920), narration_refs 간접 참조(우�
     (브랜드 소재가 모자랄 때 ComfyUI 등에 그대로 붙여넣는 용도).
   - style_preset 없는 템플릿은 400 — 스타일 없이 생성하면 컷마다 톤이 어긋나므로
     기본값으로 얼버무리지 않는다.
-- **제품화 완료** — 기능이 실제로 도는 경로에 올렸다.
-  - `templates-data/upbeat-new-menu-v2.json` 번들 시드: shots/headline/timing/
-    voice/style_preset/feel 을 전부 실제로 쓴다. 스케줄러 로테이션이 이 시드를
-    고르면 새 경로가 그대로 돈다. v1 시드 3종은 하위호환 회귀 기준으로 유지.
+- **제품화 완료** — 기능이 실제로 도는 경로에 올랐다.
+  - 번들 시드 3종이 v2: `upbeat-new-menu-v2`(warm-food) / `calm-space-mood-v2`
+    (calm-space, 느린 낭독) / `energetic-event-sale-v2`(bright-lifestyle, 빠른 낭독).
+    전부 shots/headline/timing/voice/style_preset/feel 을 실제로 쓴다. 스케줄러
+    로테이션 영상이 일관된 v2 품질(컷 변화·정렬·헤드라인·동적 캡션)로 나온다.
+    `upbeat-new-menu-v1` 하나만 하위호환 회귀 기준으로 유지.
+  - **템플릿 변수 엔진**(`templates/variables.py`): caption_template/headline
+    플레이스홀더의 출처를 통일 — 브랜드킷 필드(shop_name 등) + 동적 변수
+    (menu_name/event_name 등). 동적 변수는 **LLM 이 스크립트와 함께 생성**
+    (`[변수]` 블록, `parse_script_response` 가 파싱)해 캡션/헤드라인으로 흐른다.
+    caption_template 은 이로써 죽은 필드에서 살아난다.
+  - **자동 공개 안전장치**: 캡션은 못 채운 값이 있으면 `plan.subject` 로 폴백,
+    헤드라인은 플레이스홀더가 남으면 그 섹션 배너를 **생략** — 자동 업로드
+    영상에 `{event_name}` 같은 원문이 찍히지 않는다. 미충전 안내는 승인 UI 가
+    `required_variables` 로 별도로 한다.
   - 플랜 요약(`_plan_summary`)이 v2 필드를 노출: `template_version`,
     `style_preset`, `narration`(섹션별 목표/실측/편차/구간 + 총 길이),
-    `timeline_gate`, `clip_seconds`, `headlines`.
+    `timeline_gate`, `clip_seconds`, `headlines`, `variables`, `required_variables`.
   - 승인 UI(`webui/pages/promo.py`)가 실측 타임라인 테이블 + 타임라인 게이트 +
     컷 수 + 헤드라인을 렌더 전에 보여준다 — "승인한 것 = 렌더되는 것"을
     승인자가 눈으로 확인하는 지점.

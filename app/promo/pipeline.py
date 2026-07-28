@@ -284,13 +284,15 @@ def build_voice_preview(plan: RenderPlan, task_id: str) -> dict | None:
 def headline_texts(
     template: Template, brandkit: BrandKit, variables: dict | None = None
 ) -> list[str | None]:
-    """섹션별 헤드라인 문구를 브랜드 정보 + 동적 변수로 채운다 (show=false 면 None).
+    """섹션별 헤드라인 문구를 브랜드 정보 + 동적 변수로 채운다.
 
-    채우지 못한 플레이스홀더는 `{menu_name}` 처럼 원문이 남는다 — 운영자가
-    승인 화면에서 "무엇이 안 채워졌는지" 바로 본다 (조용한 빈칸 금지).
+    show=false 이거나 **플레이스홀더를 다 채우지 못한** 섹션은 None(배너 생략)이다.
+    영상에 `{event_name}` 같은 원문 배너가 박히면 안 되므로 — 자동 공개 영상에서는
+    배너를 빼는 게 깨진 배너보다 낫다. 미충전 안내는 승인 UI 가 템플릿의
+    required_variables 로 별도로 한다(조용한 빈칸 금지 원칙은 그쪽에서 지킨다).
     """
     from app.promo.materials.headline import format_headline
-    from app.promo.templates.variables import template_context
+    from app.promo.templates.variables import placeholder_names, template_context
 
     context = template_context(template, brandkit, variables)
     texts: list[str | None] = []
@@ -298,6 +300,14 @@ def headline_texts(
         headline = section.headline
         if headline is None or not headline.show:
             texts.append(None)
+            continue
+        unfilled = [
+            name
+            for name in placeholder_names(headline.template)
+            if not str(context.get(name, "")).strip()
+        ]
+        if unfilled:
+            texts.append(None)  # 원문 배너 금지 — 이번 렌더에서는 배너 생략
             continue
         texts.append(format_headline(headline.template, context))
     return texts
