@@ -508,3 +508,106 @@ def test_autopilot_v2_parses_variables_into_plan_and_caption(autopilot_vars_env)
     # 캡션이 subject 폴백이 아니라 채워진 caption_template 이어야 한다.
     assert "우리가게 매운 떡볶이 출시!" in captured["description"]
     assert "{menu_name}" not in captured["description"]
+
+
+# ── 타임라인 게이트 실패 시 스크립트 재생성 재시도 ─────────────────────
+
+
+def _fake_plan(template, timeline_passed, plan_id="plan-x", structural_passed=True):
+    return pipeline.RenderPlan(
+        plan_id=plan_id,
+        template=template,
+        script="스크립트",
+        materials=(),
+        used_brand_count=1,
+        photo_warning=False,
+        structural=GateResult(
+            passed=structural_passed,
+            failures=[] if structural_passed else ["브랜드 소재가 0개입니다"],
+        ),
+        timeline=GateResult(
+            passed=timeline_passed,
+            failures=[] if timeline_passed else ["TIMELINE_COVERAGE_MISMATCH: too long"],
+        ),
+        subject="테스트",
+    )
+
+
+def test_autopilot_retries_on_timeline_gate_failure(autopilot_v2_env, monkeypatch):
+    """타임라인 게이트 실패 시 분량 힌트를 더해 재생성, 성공하면 완주한다."""
+    from app.services import llm
+
+    conn = autopilot_v2_env
+    attempts = {"count": 0}
+    prompts = []
+
+    def fake_plan_render(template, kit, stock, script, local_dir, variables=None):
+        attempts["count"] += 1
+        return _fake_plan(template, timeline_passed=attempts["count"] >= 2,
+                          plan_id=f"plan-{attempts['count']}")
+
+    monkeypatch.setattr(pipeline, "plan_render", fake_plan_render)
+    monkeypatch.setattr(
+        llm, "_generate_response",
+        lambda p: prompts.append(p) or "내레이션입니다.\n[변수]\nmenu_name: 매운 떡볶이",
+    )
+
+    outcome = scheduler.run_autopilot_once(conn)
+
+    assert attempts["count"] == 2  # 첫 실패 -> 재시도 -> 성공
+    assert outcome["plan_id"] == "plan-2"
+    # 두 번째 시도 프롬프트에는 분량 재조절 힌트가 붙는다.
+    assert "[재시도 안내]" not in prompts[0]
+    assert "[재시도 안내]" in prompts[1]
+
+
+def test_autopilot_no_retry_on_structural_failure(autopilot_v2_env, monkeypatch):
+    """구조 게이트 실패는 스크립트와 무관 — 재시도 없이 즉시 실패한다."""
+    conn = autopilot_v2_env
+    attempts = {"count": 0}
+
+    def fake_plan_render(template, kit, stock, script, local_dir, variables=None):
+        attempts["count"] += 1
+        return _fake_plan(template, timeline_passed=True, structural_passed=False)
+
+    monkeypatch.setattr(pipeline, "plan_render", fake_plan_render)
+
+    with pytest.raises(scheduler.SchedulerError, match="구조 게이트"):
+        scheduler.run_autopilot_once(conn)
+    assert attempts["count"] == 1  # 재시도하지 않는다
+
+
+def test_autopilot_retry_exhaustion_raises(autopilot_v2_env, monkeypatch):
+    """타임라인 게이트가 계속 실패하면 MAX_SCRIPT_ATTEMPTS 후 SchedulerError."""
+    conn = autopilot_v2_env
+    attempts = {"count": 0}
+
+    def fake_plan_render(template, kit, stock, script, local_dir, variables=None):
+        attempts["count"] += 1
+        return _fake_plan(template, timeline_passed=False)
+
+    monkeypatch.setattr(pipeline, "plan_render", fake_plan_render)
+
+    with pytest.raises(scheduler.SchedulerError, match="통과하지 못함"):
+        scheduler.run_autopilot_once(conn)
+    assert attempts["count"] == scheduler.MAX_SCRIPT_ATTEMPTS
+
+
+def test_autopilot_logs_missing_variables(autopilot_vars_env, monkeypatch):
+    """LLM 이 동적 변수를 안 주면 경고 로그(헤드라인 생략/캡션 폴백 예고)."""
+    from loguru import logger as loguru_logger
+
+    from app.services import llm
+
+    conn, _captured = autopilot_vars_env
+    # 변수 블록 없는 응답 -> menu_name 미충전
+    monkeypatch.setattr(llm, "_generate_response", lambda p: "내레이션만 있습니다.")
+
+    messages = []
+    sink_id = loguru_logger.add(lambda msg: messages.append(str(msg)), level="WARNING")
+    try:
+        scheduler.run_autopilot_once(conn)
+    finally:
+        loguru_logger.remove(sink_id)
+
+    assert any("동적 변수를 다 채우지 못함" in m for m in messages)
