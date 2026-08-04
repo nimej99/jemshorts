@@ -262,6 +262,10 @@ fps/width 커스텀(코어 고정 1080x1920), narration_refs 간접 참조(우�
   - 승인 UI(`webui/pages/promo.py`)가 실측 타임라인 테이블 + 타임라인 게이트 +
     컷 수 + 헤드라인을 렌더 전에 보여준다 — "승인한 것 = 렌더되는 것"을
     승인자가 눈으로 확인하는 지점.
+  - **BGM 무드 정렬**: `build_video_params` 가 템플릿 `mood` 에 맞는 트랙
+    (`resource/songs/{mood}-*`)을 골라 `bgm_file` 로 넘긴다 (코어
+    `get_bgm_file` 가 파일명을 해석 — 코어 무접촉). 무드 곡이 없으면 전체
+    랜덤 폴백. energetic 영상에 잔잔한 피아노가 깔리는 부조화를 막는다.
 
 ## 7. 오픈소스 채택 결정과의 관계
 

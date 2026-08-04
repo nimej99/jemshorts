@@ -551,3 +551,70 @@ def test_execute_render_without_measured_audio_keeps_core_tts(template, env, tmp
     )
 
     assert seen["called"] is True  # voice_preview 키워드 없이 호출된다
+
+
+# --- BGM 무드 정렬 -------------------------------------------------------------
+
+
+def _songs_dir(tmp_path, names):
+    songs = tmp_path / "songs"
+    songs.mkdir()
+    for name in names:
+        (songs / name).write_bytes(b"x")
+    return songs
+
+
+def test_list_bgm_for_mood_filters_by_prefix(tmp_path, monkeypatch):
+    """{mood}- 프리픽스로 거르고, 비-mp3/다른 무드는 제외한다."""
+    from app.promo.pipeline import list_bgm_for_mood
+    from app.utils import utils
+
+    songs = _songs_dir(
+        tmp_path,
+        ["upbeat-a.mp3", "upbeat-b.mp3", "calm-c.mp3", "energetic-d.mp3", "notes.txt"],
+    )
+    monkeypatch.setattr(utils, "song_dir", lambda sub="": str(songs))
+
+    assert list_bgm_for_mood("upbeat") == ["upbeat-a.mp3", "upbeat-b.mp3"]
+    assert list_bgm_for_mood("calm") == ["calm-c.mp3"]
+    assert list_bgm_for_mood("nonexistent") == []
+    assert list_bgm_for_mood("") == []
+
+
+def test_pick_bgm_file_empty_when_no_mood_match(tmp_path, monkeypatch):
+    """무드에 맞는 곡이 없으면 빈 문자열 → 코어 전체 랜덤 폴백."""
+    from app.promo.pipeline import pick_bgm_file
+    from app.utils import utils
+
+    songs = _songs_dir(tmp_path, ["calm-only.mp3"])
+    monkeypatch.setattr(utils, "song_dir", lambda sub="": str(songs))
+
+    assert pick_bgm_file("energetic") == ""
+
+
+def test_build_video_params_picks_mood_matched_bgm(template, env, tmp_path, monkeypatch):
+    """build_video_params 가 템플릿 무드(upbeat)의 트랙을 BGM 으로 고른다."""
+    from app.utils import utils
+
+    songs = _songs_dir(tmp_path, ["upbeat-x.mp3", "upbeat-y.mp3", "calm-z.mp3"])
+    monkeypatch.setattr(utils, "song_dir", lambda sub="": str(songs))
+
+    plan = _make_plan(template, env)  # template mood == "upbeat"
+    params = build_video_params(plan)
+
+    assert params.bgm_file in ("upbeat-x.mp3", "upbeat-y.mp3")
+    assert params.bgm_type == "random"
+
+
+def test_build_video_params_bgm_empty_without_mood_songs(template, env, tmp_path, monkeypatch):
+    """무드 곡이 없으면 bgm_file 은 비고(랜덤 폴백) 랜덤 타입은 유지."""
+    from app.utils import utils
+
+    songs = _songs_dir(tmp_path, ["calm-only.mp3"])  # upbeat 곡 없음
+    monkeypatch.setattr(utils, "song_dir", lambda sub="": str(songs))
+
+    plan = _make_plan(template, env)
+    params = build_video_params(plan)
+
+    assert params.bgm_file == ""
+    assert params.bgm_type == "random"

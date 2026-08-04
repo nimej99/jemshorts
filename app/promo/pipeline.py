@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import math
 import os
+import random
 import shutil
 import time
 import uuid
@@ -326,10 +327,41 @@ def upload_caption(plan: "RenderPlan", brandkit: BrandKit) -> str:
     return plan.subject if unfilled else caption
 
 
+def list_bgm_for_mood(mood: str) -> list[str]:
+    """템플릿 무드에 맞는 BGM 파일명 목록 (resource/songs 의 `{mood}-` 프리픽스).
+
+    트랙 팩은 docs/TRACK_PACK.md 규약대로 `{mood}-{이름}.mp3` 로 정리돼 있다.
+    무드별로 골라 영상 톤과 음악이 어긋나지 않게 한다 (energetic 영상에
+    잔잔한 피아노가 깔리는 식의 부조화 방지).
+    """
+    from app.utils import utils
+
+    song_dir = utils.song_dir()
+    if not mood or not os.path.isdir(song_dir):
+        return []
+    prefix = f"{mood.lower()}-"
+    return sorted(
+        name
+        for name in os.listdir(song_dir)
+        if name.lower().startswith(prefix) and name.lower().endswith(".mp3")
+    )
+
+
+def pick_bgm_file(mood: str) -> str:
+    """무드에 맞는 BGM 파일명을 무작위 선택. 없으면 빈 문자열(랜덤 폴백).
+
+    코어 `get_bgm_file(bgm_file=...)` 가 파일명을 resource/songs 로 해석하므로
+    파일명만 넘기면 된다 (코어 무접촉). 빈 문자열이면 코어가 전체에서 랜덤 선택.
+    """
+    matches = list_bgm_for_mood(mood)
+    return random.choice(matches) if matches else ""
+
+
 def build_video_params(plan: RenderPlan, *, n_threads: int = 1) -> VideoParams:
     """RenderPlan 을 MPT 렌더 입력(VideoParams)으로 변환한다.
 
-    값 정책은 M1 실측 구성(scripts/m1_render_check.py)과 동일하다.
+    값 정책은 M1 실측 구성(scripts/m1_render_check.py)과 동일하되, BGM 은
+    템플릿 무드에 맞는 트랙을 고른다 (없으면 전체 랜덤 폴백).
     """
     return VideoParams(
         video_subject=plan.subject,
@@ -344,6 +376,7 @@ def build_video_params(plan: RenderPlan, *, n_threads: int = 1) -> VideoParams:
         voice_name=plan.voice_name,
         voice_rate=plan.voice_rate,
         bgm_type="random",
+        bgm_file=pick_bgm_file(plan.template.mood),
         bgm_volume=0.2,
         subtitle_enabled=True,
         font_name=plan.font_name,
