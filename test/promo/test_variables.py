@@ -6,7 +6,7 @@ LLM/호출자가 제공하는 동적 변수.
 
 import pytest
 
-from app.promo.brandkit.models import BrandKit
+from app.promo.brandkit.models import BrandKit, PromotionLink
 from app.promo.pipeline import RenderPlan, headline_texts, upload_caption
 from app.promo.quality import GateResult
 from app.promo.templates.schema import validate_template
@@ -160,6 +160,32 @@ def test_upload_caption_falls_back_to_subject_when_unfilled(template, kit):
     plan = _plan(template, {})
 
     assert upload_caption(plan, kit) == "우리분식 — 변수 테스트"
+
+
+def test_upload_caption_appends_promotion_links(template):
+    kit = BrandKit(
+        business_name="우리분식",
+        category="음식점",
+        promotion_links=[PromotionLink(label="예약", url="https://booking.kr")],
+    )
+    plan = _plan(template, {"menu_name": "매운떡볶이", "highlight": "20% 할인"})
+
+    caption = upload_caption(plan, kit)
+
+    assert caption == (
+        "우리분식 신메뉴 '매운떡볶이' 출시! 20% 할인\n\n▶ 예약: https://booking.kr"
+    )
+
+
+def test_upload_caption_appends_links_on_subject_fallback(template):
+    """변수 미충전 폴백 시에도 홍보 링크는 붙는다."""
+    kit = BrandKit(
+        business_name="우리분식",
+        promotion_links=[PromotionLink(url="https://mall.kr")],
+    )
+    plan = _plan(template, {})
+
+    assert upload_caption(plan, kit) == "우리분식 — 변수 테스트\n\n▶ https://mall.kr"
 
 
 # --- 헤드라인 ------------------------------------------------------------------

@@ -571,6 +571,11 @@ class ScheduleRequest(BaseModel):
     freq_per_week: int
 
 
+class PromotionLinkRequest(BaseModel):
+    label: str = ""
+    url: str = Field(min_length=1)
+
+
 class BrandkitUpdateRequest(BaseModel):
     business_name: str | None = None
     category: str | None = None
@@ -581,6 +586,7 @@ class BrandkitUpdateRequest(BaseModel):
     primary_color: str | None = None
     logo_path: str | None = None
     photos: list[str] | None = None
+    promotion_links: list[PromotionLinkRequest] | None = None
 
 
 class BrandkitCrawlRequest(BaseModel):

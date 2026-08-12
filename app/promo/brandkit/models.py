@@ -22,6 +22,38 @@ def _now_iso() -> str:
 
 
 @dataclass(frozen=True)
+class PromotionLink:
+    """업로드 캡션에 붙는 홍보 링크 (예약/쇼핑몰/제휴 링크).
+
+    수익 퍼널의 캡션 측 접점이다. label 은 선택 — 비어 있으면 url 만
+    노출한다. 제휴 링크(쿠팡 파트너스 등)는 표시광고법상 의무 문구를
+    캡션에 함께 실어야 하며, 문구는 label 이나 caption_template 에 싣는다.
+    """
+
+    label: str = ""
+    url: str = ""
+
+    def __post_init__(self):
+        object.__setattr__(self, "label", self.label.strip())
+        object.__setattr__(self, "url", self.url.strip())
+        if not self.url:
+            raise ValueError("홍보 링크 url 은 비어 있을 수 없습니다")
+
+    def caption_line(self) -> str:
+        """캡션 노출 라인: `▶ label: url` (label 없으면 `▶ url`)."""
+        if self.label:
+            return f"▶ {self.label}: {self.url}"
+        return f"▶ {self.url}"
+
+    def to_dict(self) -> dict:
+        return {"label": self.label, "url": self.url}
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "PromotionLink":
+        return cls(label=str(data.get("label") or ""), url=str(data.get("url") or ""))
+
+
+@dataclass(frozen=True)
 class BrandKit:
     business_name: str = ""
     category: str = ""
@@ -32,6 +64,7 @@ class BrandKit:
     primary_color: str | None = None  # hex 문자열 (예: "#ff6600"), 선택
     logo_path: str | None = None  # 선택
     photos: list[str] = field(default_factory=list)
+    promotion_links: list[PromotionLink] = field(default_factory=list)
     source: str = "manual"  # "crawl" | "manual" | "mixed"
     created_at: str = field(default_factory=_now_iso)
     updated_at: str = field(default_factory=_now_iso)
@@ -42,6 +75,18 @@ class BrandKit:
                 f"source '{self.source}' 은 유효하지 않습니다 "
                 f"(허용: {', '.join(VALID_SOURCES)})"
             )
+        # dict 로 들어온 링크(직렬화 복원/폼 병합 경로)를 PromotionLink 로 통일
+        normalized = []
+        for link in self.promotion_links:
+            if isinstance(link, PromotionLink):
+                normalized.append(link)
+            elif isinstance(link, dict):
+                normalized.append(PromotionLink.from_dict(link))
+            else:
+                raise TypeError(
+                    f"promotion_links 항목은 PromotionLink 또는 dict 여야 합니다: {link!r}"
+                )
+        object.__setattr__(self, "promotion_links", normalized)
 
     @property
     def photo_warning(self) -> bool:
@@ -59,6 +104,7 @@ class BrandKit:
             "primary_color": self.primary_color,
             "logo_path": self.logo_path,
             "photos": list(self.photos),
+            "promotion_links": [link.to_dict() for link in self.promotion_links],
             "source": self.source,
             "photo_warning": self.photo_warning,
             "created_at": self.created_at,
@@ -86,6 +132,9 @@ class BrandKit:
             if key in data
         }
         kwargs["photos"] = list(data.get("photos") or [])
+        kwargs["promotion_links"] = [
+            PromotionLink.from_dict(item) for item in data.get("promotion_links") or []
+        ]
         return cls(**kwargs)
 
     def touched(self, **changes) -> "BrandKit":

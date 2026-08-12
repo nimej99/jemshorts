@@ -14,7 +14,7 @@ from __future__ import annotations
 import json
 import sqlite3
 
-from app.promo.brandkit.models import BrandKit
+from app.promo.brandkit.models import BrandKit, PromotionLink
 
 # merge_manual 이 병합을 허용하는 폼 필드 (타임스탬프/출처는 병합 대상 아님)
 _MERGEABLE_FIELDS = (
@@ -27,6 +27,7 @@ _MERGEABLE_FIELDS = (
     "primary_color",
     "logo_path",
     "photos",
+    "promotion_links",
 )
 
 
@@ -77,6 +78,14 @@ def merge_manual(kit: BrandKit, form_fields: dict) -> BrandKit:
         value = form_fields[key]
         if key == "photos":
             value = list(value)
+        if key == "promotion_links":
+            # dict(API model_dump 경로)를 PromotionLink 로 통일해 동등 비교가 되게 한다
+            value = [
+                item
+                if isinstance(item, PromotionLink)
+                else PromotionLink.from_dict(item)
+                for item in value
+            ]
         if value != getattr(kit, key):
             changes[key] = value
 
