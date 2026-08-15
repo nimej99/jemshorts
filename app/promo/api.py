@@ -39,6 +39,7 @@ from app.promo.research import (
     fetch_subtitles,
     parse_script_response,
     parse_vtt,
+    rank_keywords,
 )
 from app.promo.templates.schema import (
     Template,
@@ -801,3 +802,38 @@ def refresh_trends():
         "count": outcome["count"],
         "items": [_trend_item_dict(item) for item in items],
     }
+
+
+class GapRequest(BaseModel):
+    keywords: list[str] = Field(min_length=1)
+    demand_map: dict[str, float] | None = None
+    limit: int = Field(default=10, ge=1, le=25)
+
+
+@router.post("/research/gap")
+def research_gap(body: GapRequest):
+    """키워드별 유튜브 영상 공급(상위 N 조회수)을 실측해 수요 대비 갭 점수로 랭킹.
+
+    수요 우선순위: demand_map > Google Trends 캐시 트래픽 > 1(공급 단독 랭킹).
+    커머스 갭 추천(검색량 많고 영상 적은 상품) 선별 용도이며, 실측 실패
+    키워드는 결과에서 제외된다.
+    """
+    keywords = [keyword.strip() for keyword in body.keywords if keyword.strip()]
+    if not keywords:
+        raise HTTPException(status_code=422, detail="유효한 키워드가 없습니다")
+    demand: dict[str, float] = dict(body.demand_map or {})
+    missing = set(keywords) - set(demand)
+    if missing:
+        conn = promo_db.connect()
+        try:
+            _, items = trends.latest(conn, limit=50)
+        finally:
+            conn.close()
+        for item in items:
+            if item.keyword in missing:
+                demand[item.keyword] = float(item.traffic_value)
+    try:
+        results = rank_keywords(keywords, demand, limit=body.limit)
+    except ResearchToolMissingError as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
+    return {"results": [result.to_dict() for result in results]}
