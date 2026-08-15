@@ -565,6 +565,60 @@ def test_research_gap_endpoint_blank_keywords_422(client):
     assert response.status_code == 422
 
 
+def test_research_gap_endpoint_datalab_demand(client, monkeypatch):
+    monkeypatch.setattr(promo_api.datalab, "configured", lambda: True)
+    monkeypatch.setattr(
+        promo_api.datalab,
+        "fetch_demand",
+        lambda keywords, **kwargs: {"무선 선풍기": 42.5},
+    )
+    captured = {}
+
+    def fake_rank(keywords, demand_map=None, *, limit=10):
+        captured["demand_map"] = demand_map
+        return []
+
+    monkeypatch.setattr(promo_api, "rank_keywords", fake_rank)
+    response = client.post(
+        "/api/v1/promo/research/gap", json={"keywords": ["무선 선풍기"]}
+    )
+    assert response.status_code == 200
+    assert captured["demand_map"]["무선 선풍기"] == 42.5
+
+
+def test_research_gap_endpoint_datalab_failure_falls_back_to_trends(
+    client, monkeypatch
+):
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(promo_api.datalab, "configured", lambda: True)
+
+    def raise_fetch(keywords, **kwargs):
+        raise promo_api.datalab.DataLabFetchError("boom")
+
+    monkeypatch.setattr(promo_api.datalab, "fetch_demand", raise_fetch)
+    monkeypatch.setattr(
+        promo_api.trends,
+        "latest",
+        lambda conn, limit=10: (
+            "2026-08-12T00:00:00Z",
+            [SimpleNamespace(keyword="무선 선풍기", traffic_value=700)],
+        ),
+    )
+    captured = {}
+
+    def fake_rank(keywords, demand_map=None, *, limit=10):
+        captured["demand_map"] = demand_map
+        return []
+
+    monkeypatch.setattr(promo_api, "rank_keywords", fake_rank)
+    response = client.post(
+        "/api/v1/promo/research/gap", json={"keywords": ["무선 선풍기"]}
+    )
+    assert response.status_code == 200
+    assert captured["demand_map"]["무선 선풍기"] == 700.0
+
+
 def test_brandkit_crawl_fills_empty_fields_only(client, monkeypatch):
     from app.promo.brandkit.enrich import EnrichResult
 
@@ -971,6 +1025,7 @@ def test_list_templates_includes_version_and_required_variables(client, tmp_path
 
     assert by_id["api-test-v1"]["version"] == 1
     assert by_id["api-test-v1"]["required_variables"] == []
+    assert by_id["api-test-v1"]["autopilot"] is True  # 미선언 기본값
     assert by_id["api-caption-v2"]["version"] == 2
     # caption_template 의 {shop_name} 은 브랜드킷 키라 빠지고 {menu_name} 만 동적 변수
     assert by_id["api-caption-v2"]["required_variables"] == ["menu_name"]

@@ -32,3 +32,6 @@ config.toml
 # promo-shorts (M0): compose 볼륨 디렉터리 — 이미지에 굽지 않는다 (bridge-secret 유출 방지)
 data/
 bridge-secret/
+
+# GJC 에이전트 런타임 세션 상태 — 이미지에 굽지 않는다
+.gjc/

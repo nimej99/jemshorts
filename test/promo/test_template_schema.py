@@ -33,6 +33,7 @@ BUNDLED_DIR = REPO_ROOT / "templates-data"
 SEED_IDS = {
     "upbeat-new-menu-v1",
     "calm-space-mood-v2",
+    "commerce-pick-review-v2",
     "energetic-event-sale-v2",
     "upbeat-new-menu-v2",
 }
@@ -93,10 +94,10 @@ def _with_durations(*durations_and_roles) -> dict:
 
 
 def test_bundled_seed_templates_all_pass_load_all():
-    """번들 시드 4개가 전부 load_all 검증을 통과한다."""
+    """번들 시드 5개가 전부 load_all 검증을 통과한다."""
     templates = load_all(BUNDLED_DIR)
 
-    assert len(templates) == 4
+    assert len(templates) == 5
     assert {t.template_id for t in templates} == SEED_IDS
     assert {t.mood for t in templates} == {"upbeat", "calm", "energetic"}
     for template in templates:
@@ -368,6 +369,28 @@ def test_v2_template_roundtrips_through_load_template(tmp_path):
     assert template.structure[0].shots[1].crop == "center-zoom"
 
 
+def test_autopilot_flag_defaults_true_and_parses():
+    assert validate_template(_valid_template()).autopilot is True
+    assert validate_template(_valid_template(autopilot=False)).autopilot is False
+
+
+def test_autopilot_flag_rejects_non_bool():
+    with pytest.raises(TemplateValidationError):
+        validate_template(_valid_template(autopilot="no"))
+
+
+def test_commerce_seed_is_manual_only():
+    """커머스 추천 시드는 무인 로테이션 제외 — LLM 지어낸 상품 자동 공개 금지."""
+    templates = {t.template_id: t for t in load_all(BUNDLED_DIR)}
+
+    assert templates["commerce-pick-review-v2"].autopilot is False
+    assert all(
+        template.autopilot
+        for template_id, template in templates.items()
+        if template_id != "commerce-pick-review-v2"
+    )
+
+
 def test_bundled_seed_versions():
     """upbeat-new-menu-v1 만 하위호환 회귀 기준, 나머지 3종은 v2(실제 운영 템플릿)."""
     versions = {t.template_id: t.version for t in load_all(BUNDLED_DIR)}
@@ -375,6 +398,7 @@ def test_bundled_seed_versions():
     assert versions == {
         "upbeat-new-menu-v1": 1,
         "calm-space-mood-v2": 2,
+        "commerce-pick-review-v2": 2,
         "energetic-event-sale-v2": 2,
         "upbeat-new-menu-v2": 2,
     }
@@ -417,6 +441,10 @@ def test_all_v2_seeds_declare_narration_timing_and_shots():
         ("upbeat-new-menu-v2.json", ["menu_name", "highlight"]),
         ("calm-space-mood-v2.json", ["mood_point"]),
         ("energetic-event-sale-v2.json", ["event_name", "benefit", "period"]),
+        (
+            "commerce-pick-review-v2.json",
+            ["product_name", "pain_point", "price_deal"],
+        ),
     ],
 )
 def test_v2_seeds_declare_dynamic_variables(filename, expected_vars):

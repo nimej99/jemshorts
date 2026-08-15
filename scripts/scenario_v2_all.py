@@ -1,6 +1,6 @@
 """v2 템플릿 전수 시나리오 검증 (수동 실행 — CI 아님).
 
-번들 v2 시드 3종을 전부 실제 edge-tts 로 plan 까지 돌리고, 가장 위험한
+번들 v2 시드 4종을 전부 실제 edge-tts 로 plan 까지 돌리고, 가장 위험한
 경로(energetic — 헤드라인이 전부 동적 변수)는 실제 렌더까지 완주한다.
 e2e_render_v2.py 가 upbeat-new-menu-v2 하나만 보던 것을 전 템플릿으로 확장.
 
@@ -52,6 +52,11 @@ VARIABLES_BY_TEMPLATE = {
         "benefit": "전 품목 30% 할인",
         "period": "이번 주 일요일까지",
     },
+    "commerce-pick-review-v2": {
+        "product_name": "무선 미니 선풍기",
+        "pain_point": "출퇴근 길 땀 폭발",
+        "price_deal": "기간 한정 특가 + 무료배송",
+    },
 }
 
 # 템플릿별 기대 voice.speed / 컷 분할 수(총 클립 개수) / 배너 개수(변수 충전 시)
@@ -59,6 +64,7 @@ EXPECTED = {
     "upbeat-new-menu-v2": {"voice_rate": 1.0, "clips": 4, "banners": 2},
     "calm-space-mood-v2": {"voice_rate": 0.95, "clips": 4, "banners": 2},
     "energetic-event-sale-v2": {"voice_rate": 1.05, "clips": 5, "banners": 3},
+    "commerce-pick-review-v2": {"voice_rate": 1.05, "clips": 6, "banners": 3},
 }
 
 

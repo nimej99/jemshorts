@@ -65,6 +65,44 @@ def _render_narration_panel(narration: dict, timeline_gate: dict, plan: dict) ->
         f"실측 총 길이 {narration['total_s']:g}초 · 클립 {len(clips)}개 (컷 분할 포함)"
     )
 
+# ── 0. 키워드 갭 선별 (커머스 추천) ─────────────────────────────
+st.header("0. 키워드 갭 선별")
+gap_keywords_text = st.text_area(
+    "후보 키워드 (줄바꿈 구분)",
+    help="키워드별 유튜브 공급(상위 영상 수/조회수)을 실측하고 수요 신호를 결합해 랭킹합니다. "
+    "수요: 네이버 데이터랩(네이버 키 설정 시) > Google Trends 캐시. "
+    "'수요 있는데 영상 적은' 커머스 상품을 고르세요.",
+)
+if st.button("갭 실측", disabled=not gap_keywords_text.strip()):
+    gap_keywords = [
+        line.strip() for line in gap_keywords_text.splitlines() if line.strip()
+    ]
+    try:
+        gap_result = promo_api.research_gap(
+            promo_api.GapRequest(keywords=gap_keywords)
+        )
+    except HTTPException as exc:
+        st.error(_detail(exc))
+    else:
+        gap_rows = gap_result.get("results") or []
+        if not gap_rows:
+            st.warning("실측에 성공한 키워드가 없습니다.")
+        else:
+            st.dataframe(
+                [
+                    {
+                        "키워드": row["keyword"],
+                        "수요": row["demand"],
+                        "영상 수": row["result_count"],
+                        "상위 조회수 합": row["top_view_sum"],
+                        "갭 점수": row["score"],
+                    }
+                    for row in gap_rows
+                ],
+                use_container_width=True,
+                hide_index=True,
+            )
+
 # ── 1. 브랜드킷 ──────────────────────────────────────────────────────
 st.header("1. 브랜드킷")
 conn = promo_db.connect()
