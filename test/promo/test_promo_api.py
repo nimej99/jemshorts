@@ -498,6 +498,73 @@ def test_brandkit_get_without_links_returns_empty_list(client):
     assert data["promotion_links"] == []
 
 
+# ── 키워드 갭 리서치 ──────────────────────────────────────────────
+
+
+def test_research_gap_endpoint_uses_demand_map(client, monkeypatch):
+    captured = {}
+
+    def fake_rank(keywords, demand_map=None, *, limit=10):
+        captured["keywords"] = keywords
+        captured["demand_map"] = demand_map
+        return []
+
+    monkeypatch.setattr(promo_api, "rank_keywords", fake_rank)
+    response = client.post(
+        "/api/v1/promo/research/gap",
+        json={"keywords": ["무선 선풍기"], "demand_map": {"무선 선풍기": 500}},
+    )
+    assert response.status_code == 200
+    assert response.json() == {"results": []}
+    assert captured["keywords"] == ["무선 선풍기"]
+    assert captured["demand_map"]["무선 선풍기"] == 500.0
+
+
+def test_research_gap_endpoint_trends_demand_fallback(client, monkeypatch):
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(
+        promo_api.trends,
+        "latest",
+        lambda conn, limit=10: (
+            "2026-08-12T00:00:00Z",
+            [SimpleNamespace(keyword="무선 선풍기", traffic_value=700)],
+        ),
+    )
+    captured = {}
+
+    def fake_rank(keywords, demand_map=None, *, limit=10):
+        captured["demand_map"] = demand_map
+        return []
+
+    monkeypatch.setattr(promo_api, "rank_keywords", fake_rank)
+    response = client.post(
+        "/api/v1/promo/research/gap", json={"keywords": ["무선 선풍기"]}
+    )
+    assert response.status_code == 200
+    assert captured["demand_map"]["무선 선풍기"] == 700.0
+
+
+def test_research_gap_endpoint_tool_missing_503(client, monkeypatch):
+    from app.promo.research.ingest import ResearchToolMissingError
+
+    def raise_missing(keywords, demand_map=None, *, limit=10):
+        raise ResearchToolMissingError("yt-dlp 를 찾을 수 없습니다")
+
+    monkeypatch.setattr(promo_api, "rank_keywords", raise_missing)
+    response = client.post(
+        "/api/v1/promo/research/gap", json={"keywords": ["무선 선풍기"]}
+    )
+    assert response.status_code == 503
+
+
+def test_research_gap_endpoint_blank_keywords_422(client):
+    response = client.post(
+        "/api/v1/promo/research/gap", json={"keywords": ["  "]}
+    )
+    assert response.status_code == 422
+
+
 def test_brandkit_crawl_fills_empty_fields_only(client, monkeypatch):
     from app.promo.brandkit.enrich import EnrichResult
 

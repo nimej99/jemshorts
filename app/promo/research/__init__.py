@@ -12,6 +12,13 @@ from app.promo.research.material_prompts import (
     MaterialPromptError,
     build_material_prompts,
 )
+from app.promo.research.gap import (
+    GapFetchError,
+    GapResult,
+    gap_score,
+    rank_keywords,
+    youtube_supply,
+)
 from app.promo.research.ingest import (
     Cue,
     ReferenceStats,
@@ -23,6 +30,8 @@ from app.promo.research.ingest import (
 
 __all__ = [
     "Cue",
+    "GapFetchError",
+    "GapResult",
     "MaterialPrompt",
     "MaterialPromptError",
     "DEFAULT_CHARS_PER_SEC",
@@ -35,5 +44,8 @@ __all__ = [
     "parse_script_response",
     "VARIABLES_MARKER",
     "fetch_subtitles",
+    "gap_score",
     "parse_vtt",
+    "rank_keywords",
+    "youtube_supply",
 ]
