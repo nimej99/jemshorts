@@ -30,7 +30,9 @@ promo-shorts 는 [MoneyPrinterTurbo](https://github.com/harry0703/MoneyPrinterTu
 | `scripts/docker-entrypoint.sh` (M0 review fixes) | 경로를 셸 보간 대신 env(`PROMO_STORAGE_DIR`)로 파이썬에 전달하고, `MPT_CONFIG_FILE` 을 export 해 코어가 영속 config 를 직접 사용하게 함 |
 | `resource/fonts/NotoSansKR-Bold.otf` | 한국어 기본 폰트 추가 (M0). OFL 1.1 라이선스, 출처: [notofonts/noto-cjk](https://github.com/notofonts/noto-cjk). 코드가 아닌 번들 리소스 |
 | `.gitignore` | append 만: `data/`, `bridge-secret/` (compose 볼륨 디렉터리, M0) |
+| `.gitignore` (biz/commerce-picks) | append 만: `.gjc/` — GJC 에이전트 런타임 세션 상태(토큰 로그·게이트). PUBLIC 레포에 커밋되면 유출이라 즉시 제외 |
 | `.dockerignore` | append 만: `data/`, `bridge-secret/` — `COPY . .` 시 브리지 시크릿/로컬 데이터가 이미지에 구워지는 것을 방지 (M0) |
+| `.dockerignore` (biz/commerce-picks) | append 만: `.gjc/` — 에이전트 세션 상태가 이미지에 구워지는 것을 방지 |
 
 ## 코어 수정 예외 (등재 필수)
 

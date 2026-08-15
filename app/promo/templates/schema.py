@@ -147,6 +147,11 @@ class Template:
     voice: VoiceSpec | None = None
     timing: TimingSpec | None = None
 
+    # 스케줄러 무인 로테이션 포함 여부. false 면 승인 UI 에서만 쓸 수 있다 —
+    # 실제 상품/가격 데이터가 필요한 커머스 추천 템플릿에 LLM 이 지어낸
+    # 값을 넣어 자동 공개하면 안 되므로 기본 공개에서 제외한다.
+    autopilot: bool = True
+
     @property
     def total_duration_s(self) -> float:
         return sum(section.duration_s for section in self.structure)
@@ -359,6 +364,10 @@ def validate_template(data: object, source: str = "<template>") -> Template:
         )
     _reject_v2_fields(data, V2_TEMPLATE_FIELDS, version, "", source)
 
+    autopilot = data.get("autopilot", True)
+    if not isinstance(autopilot, bool):
+        raise _err(source, "'autopilot' 은 true/false 여야 합니다")
+
     style_preset = None
     if "style_preset" in data:
         style_preset = _require_str(data, "style_preset", source)
@@ -447,6 +456,7 @@ def validate_template(data: object, source: str = "<template>") -> Template:
         style_preset=style_preset,
         voice=voice,
         timing=timing,
+        autopilot=autopilot,
     )
 
 
