@@ -42,6 +42,6 @@
     }
   ],
   "total_duration_range": [15, 30],
-  "caption_template": "{product_name} — {pain_point}, 이제 한 방에 해결하세요! {price_deal}. 구매 링크는 설명란에 있습니다.",
+  "caption_template": "[광고] {product_name} — {pain_point}, 이제 한 방에 해결하세요! {price_deal}. 구매 링크는 설명란에 있습니다.\n\n이 포스팅은 쿠팡 파트너스 활동의 일환으로, 이에 따른 일정액의 수수료를 제공받습니다.",
   "hashtags_base": ["제품추천", "구매만족", "꿀템", "인생템", "오늘의발견"]
 }

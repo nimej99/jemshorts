@@ -161,3 +161,24 @@ def test_fetch_demand_network_error(naver_keys, monkeypatch):
 
     with pytest.raises(datalab.DataLabFetchError):
         datalab.fetch_demand(["무선 선풍기"], today=date(2026, 8, 15))
+
+
+def test_fetch_demand_includes_http_error_body(naver_keys, monkeypatch):
+    """네이버 오류 본문(NID AUTH 등)이 예외 메시지에 드러나야 진단 가능하다."""
+    import io
+    import urllib.error
+
+    def raise_http(request, timeout=None):
+        raise urllib.error.HTTPError(
+            datalab.DATALAB_URL,
+            401,
+            "Unauthorized",
+            {},
+            io.BytesIO(b'{"errorCode": "024", "errorMessage": "NID AUTH failed"}'),
+        )
+
+    monkeypatch.setattr(datalab.urllib.request, "urlopen", raise_http)
+
+    with pytest.raises(datalab.DataLabFetchError, match="HTTP 401") as excinfo:
+        datalab.fetch_demand(["무선 선풍기"], today=date(2026, 8, 15))
+    assert "NID AUTH" in str(excinfo.value)

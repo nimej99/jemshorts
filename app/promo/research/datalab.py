@@ -84,6 +84,16 @@ def _request_group_demand(
     try:
         with urllib.request.urlopen(request, timeout=_TIMEOUT_S) as resp:
             body = json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        # 네이버 오류 본문(예: NID AUTH 실패 — 연동 계정 미설정)을 함께 노출
+        detail = ""
+        try:
+            detail = exc.read().decode("utf-8", errors="replace")[:300]
+        except OSError:
+            pass
+        raise DataLabFetchError(
+            f"데이터랩 호출 실패: HTTP {exc.code} {detail}".strip()
+        ) from exc
     except (OSError, json.JSONDecodeError) as exc:
         raise DataLabFetchError(f"데이터랩 호출 실패: {exc}") from exc
     return {
