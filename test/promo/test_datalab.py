@@ -80,7 +80,7 @@ def test_fetch_demand_builds_request_payload(naver_keys, monkeypatch):
     assert captured["startDate"] == "2026-07-18"
     assert captured["endDate"] == "2026-08-15"
     assert captured["timeUnit"] == "date"
-    assert captured["group"] == [
+    assert captured["keywordGroups"] == [
         {"groupName": "무선 선풍기", "keywords": ["무선 선풍기"]}
     ]
 
@@ -140,7 +140,9 @@ def test_fetch_demand_chunks_by_five(naver_keys, monkeypatch):
     def fake_urlopen(request, timeout=None):
         payload = json.loads(request.data.decode("utf-8"))
         calls.append(payload)
-        return _response_for([group["groupName"] for group in payload["group"]])
+        return _response_for(
+            [group["groupName"] for group in payload["keywordGroups"]]
+        )
 
     monkeypatch.setattr(datalab.urllib.request, "urlopen", fake_urlopen)
 
@@ -148,8 +150,8 @@ def test_fetch_demand_chunks_by_five(naver_keys, monkeypatch):
     demand = datalab.fetch_demand(keywords, today=date(2026, 8, 15))
 
     assert len(calls) == 2
-    assert len(calls[0]["group"]) == 5
-    assert len(calls[1]["group"]) == 2
+    assert len(calls[0]["keywordGroups"]) == 5
+    assert len(calls[1]["keywordGroups"]) == 2
     assert len(demand) == 7
 
 

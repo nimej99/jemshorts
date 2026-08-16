@@ -3,9 +3,10 @@
 Google Trends 급상승(뉴스 주도)은 쇼핑 키워드를 거의 커버하지 못하므로,
 국내 커머스 갭 선별에는 네이버 검색 추이 비율이 더 적합한 수요 신호다.
 네이버 지역검색과 같은 인증을 재사용한다: config `naver_client_id` /
-`naver_client_secret` (developers.naver.com 무료 발급, 데이터랩 API 권한 필요).
+`naver_client_secret`. 키는 NAVER API HUB 발급분(ncloud 콘솔 > NAVER API
+HUB > Application > 인증 정보)이며, 호출은 API HUB 게이트웨이를 통한다.
 
-- 호출당 최대 5개 그룹 — 초과 시 자동 분할 호출.
+- 호출당 최대 5개 키워드 그룹(그룹당 최대 20개 검색어) — 초과 시 자동 분할.
 - ratio 는 그룹별 정규화된 상대값(0~100)이라 그룹 간 절대량 비교는
   불가능하지만, 같은 배치의 랭킹 선별에는 충분하다.
 - 기간(기본 28일) 평균 ratio 를 키워드별 수요 값으로 집계한다.
@@ -22,7 +23,7 @@ from loguru import logger
 
 from app.config import config
 
-DATALAB_URL = "https://openapi.naver.com/v1/datalab/search"
+DATALAB_URL = "https://naverapihub.apigw.ntruss.com/search-trend/v1/search"
 MAX_GROUPS_PER_CALL = 5
 DEFAULT_DAYS = 28
 _TIMEOUT_S = 15
@@ -48,7 +49,8 @@ def _credentials() -> tuple[str, str]:
     if not client_id or not client_secret:
         raise DataLabNotConfiguredError(
             "네이버 오픈API 키가 없습니다: config 에 naver_client_id / "
-            "naver_client_secret 을 설정하세요 (데이터랩 검색추이 API 권한 필요)"
+            "naver_client_secret 을 설정하세요 (NAVER API HUB 인증 정보, "
+            "앱에 검색어트렌드 API 활성화 필요)"
         )
     return client_id, client_secret
 
@@ -68,7 +70,7 @@ def _request_group_demand(
         "startDate": start.isoformat(),
         "endDate": end.isoformat(),
         "timeUnit": "date",
-        "group": [
+        "keywordGroups": [
             {"groupName": keyword, "keywords": [keyword]} for keyword in keywords
         ],
     }
@@ -76,8 +78,8 @@ def _request_group_demand(
         DATALAB_URL,
         data=json.dumps(payload).encode("utf-8"),
         headers={
-            "X-Naver-Client-Id": client_id,
-            "X-Naver-Client-Secret": client_secret,
+            "X-NCP-APIGW-API-KEY-ID": client_id,
+            "X-NCP-APIGW-API-KEY": client_secret,
             "Content-Type": "application/json",
         },
     )
