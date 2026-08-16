@@ -391,6 +391,21 @@ def test_commerce_seed_is_manual_only():
     )
 
 
+def test_commerce_seed_caption_carries_ad_disclosure():
+    """공정위 심사지침 + 쿠팡 파트너스 유튜브 가이드 준수 고정.
+
+    캡션에 [광고] 표시(예시 3)와 의무 대가성 문구가 둘 다 있어야 한다.
+    """
+    templates = {t.template_id: t for t in load_all(BUNDLED_DIR)}
+    caption = templates["commerce-pick-review-v2"].caption_template
+
+    assert caption.startswith("[광고]")
+    assert (
+        "쿠팡 파트너스 활동의 일환으로, 이에 따른 일정액의 수수료를 제공받습니다"
+        in caption
+    )
+
+
 def test_bundled_seed_versions():
     """upbeat-new-menu-v1 만 하위호환 회귀 기준, 나머지 3종은 v2(실제 운영 템플릿)."""
     versions = {t.template_id: t.version for t in load_all(BUNDLED_DIR)}
