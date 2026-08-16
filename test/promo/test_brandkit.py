@@ -12,7 +12,7 @@ import pytest
 
 from app.promo import db as promo_db
 from app.promo.brandkit import crawler, store
-from app.promo.brandkit.models import BrandKit
+from app.promo.brandkit.models import BrandKit, PromotionLink
 from app.promo.migrations import LATEST_VERSION, MIGRATIONS
 
 
@@ -243,6 +243,49 @@ def test_invalid_source_rejected():
 
 
 # ---------------------------------------------------------------------------
+# 홍보 링크 (수익 퍼널)
+# ---------------------------------------------------------------------------
+
+
+def test_promotion_link_requires_url():
+    with pytest.raises(ValueError):
+        PromotionLink(label="예약", url="   ")
+
+
+def test_promotion_link_caption_line():
+    labeled = PromotionLink(label=" 예약 ", url=" https://booking.kr ")
+    assert labeled.caption_line() == "▶ 예약: https://booking.kr"
+    assert PromotionLink(url="https://booking.kr").caption_line() == "▶ https://booking.kr"
+
+
+def test_brandkit_normalizes_promotion_link_dicts():
+    kit = BrandKit(
+        business_name="가게",
+        promotion_links=[{"label": "예약", "url": "https://booking.kr"}],
+    )
+    assert kit.promotion_links == [
+        PromotionLink(label="예약", url="https://booking.kr")
+    ]
+
+
+def test_brandkit_rejects_non_dict_promotion_link():
+    with pytest.raises(TypeError):
+        BrandKit(business_name="가게", promotion_links=["https://booking.kr"])
+
+
+def test_promotion_links_round_trip():
+    kit = BrandKit(
+        business_name="우리동네 카페",
+        promotion_links=[
+            PromotionLink(label="예약", url="https://booking.kr"),
+            PromotionLink(url="https://mall.kr/shop"),
+        ],
+    )
+    restored = BrandKit.from_dict(kit.to_dict())
+    assert restored.promotion_links == kit.promotion_links
+
+
+# ---------------------------------------------------------------------------
 # 영속화 (v2 마이그레이션 + round-trip)
 # ---------------------------------------------------------------------------
 
@@ -359,3 +402,36 @@ def test_merge_manual_manual_source_stays_manual():
     merged = store.merge_manual(kit, {"category": "식당"})
     assert merged.category == "식당"
     assert merged.source == "manual"
+
+
+def test_merge_manual_promotion_links_from_dicts():
+    kit = BrandKit(business_name="크롤된 이름", source="crawl")
+    merged = store.merge_manual(
+        kit, {"promotion_links": [{"label": "주문", "url": "https://mall.kr"}]}
+    )
+    assert merged.promotion_links == [
+        PromotionLink(label="주문", url="https://mall.kr")
+    ]
+    assert merged.source == "mixed"
+
+
+def test_merge_manual_promotion_links_equal_is_noop():
+    """dict 경로로 들어와도 내용이 같으면 무변경 (source 전환 없음)."""
+    kit = BrandKit(
+        business_name="크롤된 이름",
+        source="crawl",
+        promotion_links=[PromotionLink(label="주문", url="https://mall.kr")],
+    )
+    merged = store.merge_manual(
+        kit, {"promotion_links": [{"label": "주문", "url": "https://mall.kr"}]}
+    )
+    assert merged is kit
+
+
+def test_merge_manual_promotion_links_empty_list_clears():
+    kit = BrandKit(
+        business_name="가게",
+        promotion_links=[PromotionLink(url="https://mall.kr")],
+    )
+    merged = store.merge_manual(kit, {"promotion_links": []})
+    assert merged.promotion_links == []

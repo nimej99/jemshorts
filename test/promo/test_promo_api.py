@@ -470,6 +470,34 @@ def test_brandkit_put_merges_fields(client):
     assert data["business_name"] == "우리가게"  # 기존 필드 보존
 
 
+def test_brandkit_put_promotion_links_round_trip(client):
+    response = client.put(
+        "/api/v1/promo/brandkit",
+        json={"promotion_links": [{"label": "예약", "url": "https://booking.kr"}]},
+    )
+    assert response.status_code == 200
+    assert response.json()["promotion_links"] == [
+        {"label": "예약", "url": "https://booking.kr"}
+    ]
+    data = client.get("/api/v1/promo/brandkit").json()
+    assert data["promotion_links"] == [
+        {"label": "예약", "url": "https://booking.kr"}
+    ]
+
+
+def test_brandkit_put_promotion_link_empty_url_rejected(client):
+    response = client.put(
+        "/api/v1/promo/brandkit",
+        json={"promotion_links": [{"label": "예약", "url": ""}]},
+    )
+    assert response.status_code == 422
+
+
+def test_brandkit_get_without_links_returns_empty_list(client):
+    data = client.get("/api/v1/promo/brandkit").json()
+    assert data["promotion_links"] == []
+
+
 def test_brandkit_crawl_fills_empty_fields_only(client, monkeypatch):
     from app.promo.brandkit.enrich import EnrichResult
 

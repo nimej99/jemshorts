@@ -319,12 +319,16 @@ def upload_caption(plan: "RenderPlan", brandkit: BrandKit) -> str:
     `plan.subject` 로 폴백한다.
 
     자동(스케줄러)으로 공개되는 캡션에 `{menu_name}` 같은 원문이 찍히면
-    안 되므로, unfilled 가 하나라도 있으면 안전한 subject 로 물러선다.
+    안 되므로 unfilled 가 하나라도 있으면 안전한 subject 로 물러선다.
+    브랜드킷 홍보 링크(예약/쇼핑몰/제휴)는 본문 뒤에 붙는다 — 조회를
+    수익 전환으로 잇는 퍼널이며, 폴백 시에도 함께 붙는다.
     """
     from app.promo.templates.variables import render_caption
 
     caption, unfilled = render_caption(plan.template, brandkit, plan.variables)
-    return plan.subject if unfilled else caption
+    body = plan.subject if unfilled else caption
+    links = "\n".join(link.caption_line() for link in brandkit.promotion_links)
+    return f"{body}\n\n{links}" if links else body
 
 
 def list_bgm_for_mood(mood: str) -> list[str]:

@@ -23,7 +23,7 @@ from app.promo import api as promo_api  # noqa: E402
 from app.promo import db as promo_db  # noqa: E402
 from app.promo import plans  # noqa: E402
 from app.promo.brandkit import store as brandkit_store  # noqa: E402
-from app.promo.brandkit.models import BrandKit  # noqa: E402
+from app.promo.brandkit.models import BrandKit, PromotionLink  # noqa: E402
 
 st.set_page_config(page_title="Promo Shorts", page_icon="🎬", layout="wide")
 st.title("🎬 Promo Shorts — 홍보 쇼츠 파이프라인")
@@ -128,13 +128,35 @@ with st.form("brandkit_form"):
         value="\n".join(kit.photos) if kit else "",
         help="가게 사진/영상 파일의 서버 경로. 렌더 시 storage/local_videos 로 복사됩니다.",
     )
+    links_text = st.text_area(
+        "홍보 링크 (줄바꿈 구분, `라벨 | URL` 또는 URL 만)",
+        value="\n".join(
+            f"{link.label} | {link.url}" if link.label else link.url
+            for link in (kit.promotion_links if kit else [])
+        ),
+        help="업로드 캡션 본문 뒤에 붙습니다. 예약/스마트스토어/쿠팡 파트너스 링크 등. "
+        "제휴 링크는 표시광고법상 의무 문구를 캡션에 함께 실어야 합니다.",
+    )
     if st.form_submit_button("브랜드킷 저장"):
         photos = [line.strip() for line in photos_text.splitlines() if line.strip()]
+        promotion_links = []
+        for line in links_text.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            if "|" in line:
+                label, url = line.split("|", 1)
+                promotion_links.append(
+                    PromotionLink(label=label.strip(), url=url.strip())
+                )
+            else:
+                promotion_links.append(PromotionLink(url=line))
         new_kit = BrandKit(
             business_name=business_name.strip(),
             category=category.strip(),
             description=description.strip(),
             photos=photos,
+            promotion_links=promotion_links,
             source="manual",
         )
         conn = promo_db.connect()
