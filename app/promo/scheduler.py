@@ -185,13 +185,19 @@ def run_autopilot_once(conn: sqlite3.Connection) -> dict:
     raws = load_all_raw(templates_data_dir())
     if not raws:
         raise SchedulerError("템플릿이 없습니다")
+    # autopilot=false 템플릿(커머스 추천 등 실제 데이터 필수)은 무인 로테이션 제외
+    eligible = [raw for raw in raws if raw.get("autopilot", True)]
+    if not eligible:
+        raise SchedulerError(
+            "오토파일럿 대상 템플릿이 없습니다 (autopilot=false 만 남음)"
+        )
     delivered_total = int(
         conn.execute(
             "SELECT COUNT(*) FROM videos WHERE status = ?",
             (uploads.STATUS_DELIVERED,),
         ).fetchone()[0]
     )
-    raw = raws[delivered_total % len(raws)]  # 누적 업로드 수 기준 로테이션
+    raw = eligible[delivered_total % len(eligible)]  # 누적 업로드 수 기준 로테이션
     template = validate_template(raw, source=raw["template_id"])
 
     trend_keywords = trends.latest_keywords(conn)

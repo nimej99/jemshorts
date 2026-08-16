@@ -1,0 +1,47 @@
+{
+  "template_id": "commerce-pick-review-v2",
+  "name": "커머스 추천 상품 리뷰 v2 (고충 -> 상품 -> 가격 -> 링크 유도)",
+  "version": 2,
+  "mood": "energetic",
+  "autopilot": false,
+  "style_preset": "clean-product",
+  "voice": { "speed": 1.05 },
+  "timing": { "owner": "narration", "tolerance_s": 0.2 },
+  "structure": [
+    {
+      "role": "hook",
+      "duration_s": 3,
+      "script_guide": "고충을 찌르는 질문이나 공감 상황으로 시작하세요. 상품명은 아직 드러내지 말고 호기심만 먼저 만듭니다. 예: '아직도 그거 때문에 고생 중이세요?'",
+      "material_slot": "any",
+      "headline": { "template": "{pain_point}", "show": true },
+      "shots": [
+        { "kind": "wide", "motion": "push-in" },
+        { "kind": "cutin", "crop": "center-zoom", "motion": "drift" }
+      ],
+      "feel": "공감을 일으키는, 호기심 돋우는"
+    },
+    {
+      "role": "body",
+      "duration_s": 12,
+      "script_guide": "상품명을 소개하고 핵심 장점을 두세 가지, 한 문장씩 끊어 전달하세요. 실제 사용 장면이나 구성/가성비 우위도 한 문장 얹습니다. 예: '오늘 소개할 아이템은 OOO입니다. 이것 하나면 OOO가 해결됩니다.'",
+      "material_slot": "any",
+      "headline": { "template": "{product_name}", "show": true },
+      "shots": [
+        { "kind": "wide" },
+        { "kind": "cutin", "crop": "left" },
+        { "kind": "cutin", "crop": "right" }
+      ],
+      "feel": "신뢰감 있는, 정보 전달력 있는"
+    },
+    {
+      "role": "cta",
+      "duration_s": 5,
+      "script_guide": "가격/혜택을 제시하고 설명란의 구매 링크 확인을 유도하세요. 예: '지금 특가에 무료배송까지! 구매 링크는 설명란에 있어요.'",
+      "material_slot": "photo",
+      "headline": { "template": "{price_deal}", "show": true }
+    }
+  ],
+  "total_duration_range": [15, 30],
+  "caption_template": "{product_name} — {pain_point}, 이제 한 방에 해결하세요! {price_deal}. 구매 링크는 설명란에 있습니다.",
+  "hashtags_base": ["제품추천", "구매만족", "꿀템", "인생템", "오늘의발견"]
+}

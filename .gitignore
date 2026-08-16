@@ -47,6 +47,9 @@ htmlcov/
 data/
 bridge-secret/
 
+# GJC 에이전트 런타임 세션 상태 (토큰 로그 등 — 공개 레포 유출 금지)
+.gjc/
+
 # 파일 동기화 도구가 만드는 중복본 ("headline 2.py") — 커밋 금지
 * [0-9].*
 

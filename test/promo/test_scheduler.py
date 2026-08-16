@@ -1,6 +1,7 @@
 """스케줄러(주기 계산/tick/오토파일럿) 테스트 — 실 렌더/실 네트워크 없음."""
 
 import json
+import os
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -216,6 +217,42 @@ def test_autopilot_happy_path(autopilot_env):
 def test_autopilot_requires_brandkit(conn, monkeypatch, tmp_path):
     with pytest.raises(scheduler.SchedulerError, match="브랜드킷"):
         scheduler.run_autopilot_once(conn)
+
+
+def test_autopilot_refuses_when_only_manual_templates(conn, tmp_path, monkeypatch):
+    """autopilot=false 템플릿만 남으면 무인 실행은 거부한다 (지어내기 방지)."""
+    clip = tmp_path / "brand.mp4"
+    clip.write_bytes(b"dummy")
+    brandkit_store.save(conn, BrandKit(business_name="우리가게", photos=[str(clip)]))
+    templates_dir = tmp_path / "templates-data"
+    templates_dir.mkdir()
+    manual_only = dict(TEMPLATE_DATA, template_id="manual-only", autopilot=False)
+    (templates_dir / "manual-only.json").write_text(
+        json.dumps(manual_only, ensure_ascii=False), encoding="utf-8"
+    )
+    monkeypatch.setattr(scheduler, "templates_data_dir", lambda: str(templates_dir))
+
+    with pytest.raises(scheduler.SchedulerError, match="오토파일럿 대상"):
+        scheduler.run_autopilot_once(conn)
+
+
+def test_autopilot_rotation_skips_manual_only_templates(autopilot_env):
+    """manual-only 템플릿이 섞여도 로테이션은 eligible 템플릿을 고른다."""
+    conn = autopilot_env
+    manual_only = dict(TEMPLATE_DATA, template_id="manual-only", autopilot=False)
+    with open(
+        os.path.join(scheduler.templates_data_dir(), "a-manual.json"),
+        "w",
+        encoding="utf-8",
+    ) as fh:
+        json.dump(manual_only, fh, ensure_ascii=False)
+
+    outcome = scheduler.run_autopilot_once(conn)
+
+    row = plans.get_row(conn, outcome["plan_id"])
+    restored = plans.restore_plan(row)
+    assert restored.template.template_id == TEMPLATE_DATA["template_id"]
+    assert restored.template.autopilot is True
 
 
 def test_autopilot_skips_when_cap_reached(autopilot_env, monkeypatch):

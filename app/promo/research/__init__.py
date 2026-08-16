@@ -1,5 +1,17 @@
 """promo-shorts 레퍼런스 리서치 계층 (경쟁/참고 쇼츠 자막 수집·분석·프롬프트 힌트)."""
 
+from app.promo.research.datalab import (
+    DataLabFetchError,
+    DataLabNotConfiguredError,
+    fetch_demand,
+)
+from app.promo.research.gap import (
+    GapFetchError,
+    GapResult,
+    gap_score,
+    rank_keywords,
+    youtube_supply,
+)
 from app.promo.research.hints import (
     DEFAULT_CHARS_PER_SEC,
     VARIABLES_MARKER,
@@ -23,6 +35,10 @@ from app.promo.research.ingest import (
 
 __all__ = [
     "Cue",
+    "DataLabFetchError",
+    "DataLabNotConfiguredError",
+    "GapFetchError",
+    "GapResult",
     "MaterialPrompt",
     "MaterialPromptError",
     "DEFAULT_CHARS_PER_SEC",
@@ -34,6 +50,10 @@ __all__ = [
     "char_budget",
     "parse_script_response",
     "VARIABLES_MARKER",
+    "fetch_demand",
     "fetch_subtitles",
+    "gap_score",
     "parse_vtt",
+    "rank_keywords",
+    "youtube_supply",
 ]

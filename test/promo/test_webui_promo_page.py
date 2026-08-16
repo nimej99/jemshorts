@@ -47,6 +47,40 @@ def isolated_env(tmp_path, monkeypatch):
     return tmp_path
 
 
+def test_page_gap_panel_runs_research_gap(isolated_env, monkeypatch):
+    captured = {}
+
+    def fake_gap(body):
+        captured["keywords"] = body.keywords
+        return {
+            "results": [
+                {
+                    "keyword": "무선 선풍기",
+                    "demand": 42.5,
+                    "result_count": 3,
+                    "top_view_sum": 1500,
+                    "top_view_max": 900,
+                    "score": 1.06,
+                }
+            ]
+        }
+
+    monkeypatch.setattr(promo_api, "research_gap", fake_gap)
+
+    at = AppTest.from_file(PAGE_PATH, default_timeout=15)
+    at.run()
+    assert not at.exception
+
+    area = next(t for t in at.text_area if "후보 키워드" in t.label)
+    area.set_value("무선 선풍기").run()
+    button = next(b for b in at.button if b.label == "갭 실측")
+    button.click().run()
+
+    assert not at.exception
+    assert captured["keywords"] == ["무선 선풍기"]
+    assert at.dataframe  # 갭 결과 테이블이 그려졌다
+
+
 def test_page_stops_with_warning_without_brandkit(isolated_env):
     at = AppTest.from_file(PAGE_PATH, default_timeout=15)
     at.run()

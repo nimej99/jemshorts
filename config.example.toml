@@ -281,8 +281,9 @@ promo_upload_daily_cap = 3
 # Google Trends 급상승 검색어 폴링 지역/신선도(시간)
 promo_trends_geo = "KR"
 promo_trends_stale_hours = 6
-# 네이버 공식 오픈API (지역검색 — 브랜드킷 상호/주소/전화 수집)
-# https://developers.naver.com 에서 무료 발급
+# 네이버 공식 오픈API (지역검색 — 브랜드킷 상호/주소/전화 수집,
+# 데이터랩 검색추이 — 키워드 갭 선별의 수요 신호)
+# https://developers.naver.com 에서 무료 발급 (데이터랩은 애플리케이션에서 검색추이 API 권한 추가)
 naver_client_id = ""
 naver_client_secret = ""
 # 네이버 플레이스 보조 수집 (Scrapling 실브라우저 — 기본 비활성).
