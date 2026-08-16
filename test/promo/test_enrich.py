@@ -168,7 +168,10 @@ def _fake_urlopen(payload):
             return False
 
     def opener(request, timeout=0):
-        assert request.get_header("X-naver-client-id") == "cid"
+        # urllib 가 헤더 키를 capitalize 함 — API HUB 인증 헤더 + 호출 주소 고정
+        assert request.get_header("X-ncp-apigw-api-key-id") == "cid"
+        assert request.get_header("X-ncp-apigw-api-key") == "sec"
+        assert request.full_url.startswith(enrich.NAVER_LOCAL_API)
         return _Resp(json.dumps(payload).encode("utf-8"))
 
     return opener

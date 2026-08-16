@@ -30,7 +30,7 @@ SITE_INSTAGRAM = "instagram"
 SITE_NAVER_PLACE = "naver-place"
 SITE_GENERIC = "generic"
 
-NAVER_LOCAL_API = "https://openapi.naver.com/v1/search/local.json"
+NAVER_LOCAL_API = "https://naverapihub.apigw.ntruss.com/search/v1/local"
 _NAVER_TIMEOUT_S = 10
 
 # "Name (@handle) • Instagram photos and videos" / "이름(@handle) • Instagram ..."
@@ -310,7 +310,8 @@ def _naver_credentials() -> tuple[str, str]:
     if not client_id or not client_secret:
         raise NaverApiNotConfiguredError(
             "네이버 오픈API 키가 없습니다: config 에 naver_client_id / "
-            "naver_client_secret 을 설정하세요 (developers.naver.com 무료 발급)"
+            "naver_client_secret 을 설정하세요 (NAVER API HUB: ncloud 콘솔 > "
+            "NAVER API HUB > Application > 인증 정보)"
         )
     return client_id, client_secret
 
@@ -329,8 +330,8 @@ def naver_local_search(query: str, display: int = 5) -> list[dict]:
     request = urllib.request.Request(
         f"{NAVER_LOCAL_API}?{params}",
         headers={
-            "X-Naver-Client-Id": client_id,
-            "X-Naver-Client-Secret": client_secret,
+            "X-NCP-APIGW-API-KEY-ID": client_id,
+            "X-NCP-APIGW-API-KEY": client_secret,
         },
     )
     try:

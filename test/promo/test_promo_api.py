@@ -523,6 +523,8 @@ def test_research_gap_endpoint_uses_demand_map(client, monkeypatch):
 def test_research_gap_endpoint_trends_demand_fallback(client, monkeypatch):
     from types import SimpleNamespace
 
+    # 로컬 config 에 실제 네이버 키가 있어도 이 테스트는 트렌드 폴백만 본다
+    monkeypatch.setattr(promo_api.datalab, "configured", lambda: False)
     monkeypatch.setattr(
         promo_api.trends,
         "latest",
