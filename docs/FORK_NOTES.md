@@ -33,6 +33,9 @@ promo-shorts 는 [MoneyPrinterTurbo](https://github.com/harry0703/MoneyPrinterTu
 | `.gitignore` (biz/commerce-picks) | append 만: `.gjc/` — GJC 에이전트 런타임 세션 상태(토큰 로그·게이트). PUBLIC 레포에 커밋되면 유출이라 즉시 제외 |
 | `.dockerignore` | append 만: `data/`, `bridge-secret/` — `COPY . .` 시 브리지 시크릿/로컬 데이터가 이미지에 구워지는 것을 방지 (M0) |
 | `.dockerignore` (biz/commerce-picks) | append 만: `.gjc/` — 에이전트 세션 상태가 이미지에 구워지는 것을 방지 |
+| `docker-compose.postiz.yml` | 신규 — Postiz 셀프호스트 스택 (게시 백엔드). 앱 컨테이너와 분리된 별도 구성 |
+| `dynamicconfig/development-sql.yaml` | 신규 — temporal 동적 설정 번들 (postiz 공식 레포 원본) |
+| `.gitignore` (postiz 스택) | append 만: `docker-compose.postiz.env` — JWT 시크릿·관리자 계정·API 키 저장소 |
 
 ## 코어 수정 예외 (등재 필수)
 
@@ -72,6 +75,15 @@ promo-shorts 는 [MoneyPrinterTurbo](https://github.com/harry0703/MoneyPrinterTu
   없어 LICENSE 영향 없음. upload-post.com(유료) 대체 경로.
   셀프호스트 실기동 검증은 운영 셋업 시점에 수행 (어댑터는 공식 API 문서
   docs.postiz.com/public-api 기준 구현 + 모킹 테스트 완료).
+- **Postiz 실기동 검증 완료 (2026-08-22)**: `docker-compose.postiz.yml`
+  (postiz + postgres17 + redis7 + temporal 스택, 공식 gitroomhq/postiz-app
+  기준) 로 로컬 기동 확인. 공개 API 베이스는 `/api/public/v1` (프론트 `/public/v1`
+  아님 — 307 로 `/auth` 리다이렉트됨). 인증은 `Authorization: <publicApi 키>`
+  (헤더에 키 원문만, `Bearer` 불필요). 키는 웹 가입 후 `/api/user/self`
+  응답의 `publicApi` 필드. 이미지 `ghcr.io/postiz/postiz` 는 존재하지 않으며
+  올바른 이미지는 `ghcr.io/gitroomhq/postiz-app:latest`. 시크릿은 `docker-
+  compose.postiz.env`(gitignore) 로 주입. `dynamicconfig/development-sql.yaml`
+  은 temporal 설정용 번들 리소스.
 - **Scrapling (BSD-3) 조건부 채택**: 네이버 공식 지역검색 API 로 부족할
   때의 보조 수집 카드. enrich 계층(PR #1)에 의존하므로 **PR #1 머지 후**
   config 옵션 플래그로 통합한다. 봇차단 우회는 약관 리스크 상존 — 기본
