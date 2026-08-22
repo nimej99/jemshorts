@@ -9,8 +9,8 @@
 
 config:
   promo_publish_backend            "upload_post"(기본) | "postiz"
-  postiz_api_url                   예: http://localhost:4007/public/v1
-  postiz_api_key                   Settings > Developers > Public API
+  postiz_api_url                   예: http://localhost:4007/api/public/v1 (/api 프리픽스 필수)
+  postiz_api_key                   Settings > Developers > Public API 키
   postiz_youtube_integration_id    GET {base}/integrations 로 확인
 
 반환 계약은 upload_post 와 동일하게 {"success": bool, ...} 로 수렴한다

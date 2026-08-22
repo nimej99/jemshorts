@@ -56,3 +56,6 @@ bridge-secret/
 # e2e 검증 스크립트가 생성하는 프레임/산출물 (재생성 가능 — 커밋 금지)
 docs/qa/v2-frame-*.jpg
 docs/e2e-frame.jpg
+
+# Postiz compose 시크릿
+docker-compose.postiz.env
