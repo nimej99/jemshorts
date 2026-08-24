@@ -43,6 +43,15 @@ def _offline_trends(monkeypatch):
     )
 
 
+@pytest.fixture(autouse=True)
+def _pin_publish_backend(monkeypatch):
+    """운영자 로컬 설정(예: postiz 실서버)이 테스트 업로드 경로로 새지 않게,
+    모킹된 upload_post 백엔드로 고정한다."""
+    from app.config import config
+
+    monkeypatch.setitem(config.app, "promo_publish_backend", "upload_post")
+
+
 @pytest.fixture()
 def conn(tmp_path):
     connection = promo_db.connect(tmp_path / "sched-test.db")

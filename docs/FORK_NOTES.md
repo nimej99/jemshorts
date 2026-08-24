@@ -84,6 +84,14 @@ promo-shorts 는 [MoneyPrinterTurbo](https://github.com/harry0703/MoneyPrinterTu
   올바른 이미지는 `ghcr.io/gitroomhq/postiz-app:latest`. 시크릿은 `docker-
   compose.postiz.env`(gitignore) 로 주입. `dynamicconfig/development-sql.yaml`
   은 temporal 설정용 번들 리소스.
+- **Postiz 게시 계약 실측 검증 (2026-08-25)**: 현재 버전 DTO 기준 —
+  (1) `settings.selfDeclaredMadeForKids` 는 불리언이 아니라 `"yes"|"no"`.
+  (2) `settings.tags` 는 문자열 배열이 아니라 `{value, label}` 객체 배열.
+  (3) 미디어 경로는 자체 URL 이 아닌 컨테이너 로컬 경로 전달: SSRF 안전
+  디스패처가 자체 `localhost` URL fetch 를 차단(`Blocked IP`)하므로, `path` 에서
+  오리진+`/uploads` 접두를 제거한 `/2026-08-24/...` 를 넘긴다 — posts.service 가
+  비-HTTP 경로 앞에 `UPLOAD_DIRECTORY(/uploads)` 를 재결합해 최종 로컬 경로가 됨.
+  이 경로로 젬쇼츠 채널 첫 쇼츠 게시 성공 (videoId kDd_ZD69jBg).
 - **Scrapling (BSD-3) 조건부 채택**: 네이버 공식 지역검색 API 로 부족할
   때의 보조 수집 카드. enrich 계층(PR #1)에 의존하므로 **PR #1 머지 후**
   config 옵션 플래그로 통합한다. 봇차단 우회는 약관 리스크 상존 — 기본

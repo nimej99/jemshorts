@@ -36,6 +36,15 @@ TEMPLATE_DATA = {
 SCRIPT = "드디어 나왔다, 신메뉴! 지금 방문하세요."
 
 
+@pytest.fixture(autouse=True)
+def _pin_publish_backend(monkeypatch):
+    """운영자 로컬 설정(예: postiz 실서버)이 테스트 업로드 경로로 새지 않게,
+    모킹된 upload_post 백엔드로 고정한다."""
+    from app.config import config
+
+    monkeypatch.setitem(config.app, "promo_publish_backend", "upload_post")
+
+
 @pytest.fixture()
 def client(tmp_path, monkeypatch):
     # 격리: DB / 템플릿 디렉터리 / storage 디렉터리 전부 tmp 로

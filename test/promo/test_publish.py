@@ -79,7 +79,7 @@ def test_postiz_upload_then_post(postiz_config, monkeypatch, tmp_path):
         requests_made.append({"url": url, "headers": headers, "json": json})
         if url.endswith("/upload"):
             assert files is not None
-            return _Resp({"id": "media-1", "path": "http://up/v.mp4"})
+            return _Resp({"id": "media-1", "path": "http://up/uploads/v.mp4"})
         assert url.endswith("/posts")
         return _Resp([{"postId": "post-1"}])
 
@@ -98,9 +98,13 @@ def test_postiz_upload_then_post(postiz_config, monkeypatch, tmp_path):
     post = payload["posts"][0]
     assert post["integration"]["id"] == "int-1"
     assert post["value"][0]["image"][0]["id"] == "media-1"
+    # SSRF 차단 우회: '/uploads' 접두 제거한 로컬 경로 전달 (자체 URL 아님)
+    assert post["value"][0]["image"][0]["path"] == "/v.mp4"
     assert post["settings"]["__type"] == "youtube"
     assert len(post["settings"]["title"]) <= 100  # 제목 상한 절단
-    assert post["settings"]["selfDeclaredMadeForKids"] is False
+    assert post["settings"]["selfDeclaredMadeForKids"] == "no"
+    # 현재 Postiz DTO: tags 는 {value, label} 객체 배열 (문자열 배열 아님)
+    assert post["settings"]["tags"] == [{"value": "태그", "label": "태그"}]
 
 
 def test_postiz_http_failure_converges(postiz_config, monkeypatch, tmp_path):
