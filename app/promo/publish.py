@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import os
 from datetime import datetime, timezone
+from urllib.parse import urlparse
 
 import requests
 from loguru import logger
@@ -78,6 +79,13 @@ def _postiz_publish(
             )
         upload_resp.raise_for_status()
         media = upload_resp.json()
+        # SSRF 차단으로 컨테이너가 자체 미디어 URL 을 fetch 하지 못해 로컬 경로를 넘긴다.
+        # Postiz 는 비-HTTP 경로 앞에 UPLOAD_DIRECTORY(/uploads) 를 붙이므로,
+        # '/uploads/...' 접두를 제거한 '/2026-08-24/...' 를 넘겨야
+        # '/uploads/uploads/...' 이중 결합 없이 '/uploads/2026-08-24/...' 가 된다.
+        media_path = urlparse(media.get("path", "")).path or media.get("path", "")
+        if media_path.startswith("/uploads/"):
+            media_path = media_path[len("/uploads"):]
 
         payload = {
             "type": "now",
@@ -91,7 +99,7 @@ def _postiz_publish(
                         {
                             "content": description,
                             "image": [
-                                {"id": media.get("id"), "path": media.get("path")}
+                                {"id": media.get("id"), "path": media_path}
                             ],
                         }
                     ],
@@ -99,8 +107,10 @@ def _postiz_publish(
                         "__type": "youtube",
                         "title": title[:100],
                         "type": privacy_status,
-                        "tags": tags,
-                        "selfDeclaredMadeForKids": False,
+                        "tags": [
+                            {"value": tag, "label": tag} for tag in tags
+                        ],
+                        "selfDeclaredMadeForKids": "no",
                     },
                 }
             ],
