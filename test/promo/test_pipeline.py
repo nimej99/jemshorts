@@ -106,6 +106,8 @@ def test_build_video_params_maps_plan(template, env):
     assert [m.url for m in params.video_materials] == [m.url for m in plan.materials]
     assert params.voice_name == plan.voice_name
     assert params.subtitle_enabled is True
+    assert params.subtitle_position == "custom"
+    assert params.custom_position == 62.0
     assert params.n_threads == 1
 
 
