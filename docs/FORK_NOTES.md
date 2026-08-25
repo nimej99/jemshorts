@@ -92,6 +92,14 @@ promo-shorts 는 [MoneyPrinterTurbo](https://github.com/harry0703/MoneyPrinterTu
   오리진+`/uploads` 접두를 제거한 `/2026-08-24/...` 를 넘긴다 — posts.service 가
   비-HTTP 경로 앞에 `UPLOAD_DIRECTORY(/uploads)` 를 재결합해 최종 로컬 경로가 됨.
   이 경로로 젬쇼츠 채널 첫 쇼츠 게시 성공 (videoId kDd_ZD69jBg).
+- **커머스 소재/댓글 안전 게이트 (2026-08-25)**: 상품 페이지 전체 `img`
+  수집은 추천상품(햄/채소 등)이 섞이므로 금지. 상품 선별 결과의 대표 이미지를
+  신뢰 기준으로 삼고 색상 히스토그램 유사도 0.75 이상인 후보만 렌더에 사용한다.
+  전 후보가 탈락하면 대표 이미지만 크롭/줌으로 재사용해 타 상품 노출보다
+  안전하게 수렴한다. Postiz 비동기 게시 후 YouTube uploads playlist 를 저비용
+  API로 폴링해 쿠팡 파트너스 구매 링크+경제적 이해관계 댓글을 자동 등록한다.
+  Shorts 설명/댓글의 일반 URL은 YouTube 정책상 클릭 불가이며, 클릭 가능한
+  쇼핑 스티커는 YPP/YouTube Shopping 자격과 Studio 상품 태깅이 별도로 필요하다.
 - **Scrapling (BSD-3) 조건부 채택**: 네이버 공식 지역검색 API 로 부족할
   때의 보조 수집 카드. enrich 계층(PR #1)에 의존하므로 **PR #1 머지 후**
   config 옵션 플래그로 통합한다. 봇차단 우회는 약관 리스크 상존 — 기본
