@@ -16,6 +16,7 @@ def test_hub_products_have_direct_affiliate_links_and_identity():
         assert product["itemId"].isdigit()
         assert product["vendorItemId"].isdigit()
         assert product["affiliateUrl"].startswith("https://link.coupang.com/")
+        assert product["videoUrl"].startswith("https://www.youtube.com/watch?v=")
         assert product["image"].startswith("https://")
         assert product["checkedAt"]
 
