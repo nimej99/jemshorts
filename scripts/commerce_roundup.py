@@ -63,7 +63,13 @@ def _select_products(conn, products: list[dict], count: int) -> list[dict]:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="커머스 TOP3/TOP5 쇼츠")
-    parser.add_argument("--top", type=int, choices=(3, 5), required=True)
+    parser.add_argument(
+        "--top",
+        type=int,
+        choices=(3, 5),
+        default=3,
+        help="기본 3(일일 TOP3), 주간 성과 결산은 5",
+    )
     parser.add_argument("--title", default="")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--force", action="store_true")

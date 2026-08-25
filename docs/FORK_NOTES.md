@@ -159,9 +159,14 @@ promo-shorts 는 [MoneyPrinterTurbo](https://github.com/harry0703/MoneyPrinterTu
 
 - `scripts/build_product_hub.py`가 상품별 canonical/OG/Product JSON-LD 페이지,
   `sitemap.xml`, `robots.txt`를 생성한다. GitHub Pages 배포 전에 항상 실행.
-- 상품 3개/5개 누적 시 `scripts/commerce_roundup.py --top 3|5`로 7일 성과
-  순위 기반 비교 영상을 만든다. 단일 상품 쇼츠는 탐색 데이터 수집용으로
-  유지하고, 비교 영상은 검증된 활성 상품만 사용한다.
+- **쿠팡 쇼츠 기본 단위는 일일 TOP3**:
+  `scripts/commerce_roundup.py` (`--top` 기본값 3). 수요 갭이 큰 한 주제를
+  고른 뒤 그 주제에서 상품 3개를 잠그고, 각 상품의 식별자·대표 이미지·링크를
+  독립 검증한 후 3위→1위 순으로 소개한다.
+- **TOP5는 주간 결산**: `scripts/commerce_roundup.py --top 5`. 7일 실제
+  수수료/EPC 우선 순위의 활성 상품만 사용한다.
+- 단일 상품 `scripts/commerce_pick.py`는 가격 급락·신상품·TOP3 우승 상품의
+  심화 리뷰에만 사용한다. 무조건 단일 상품 1개씩 게시하는 운영은 금지한다.
 - **Scrapling (BSD-3) 조건부 채택**: 네이버 공식 지역검색 API 로 부족할
   때의 보조 수집 카드. enrich 계층(PR #1)에 의존하므로 **PR #1 머지 후**
   config 옵션 플래그로 통합한다. 봇차단 우회는 약관 리스크 상존 — 기본
