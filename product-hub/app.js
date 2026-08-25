@@ -39,6 +39,8 @@ function renderProduct(product) {
   buy.href = product.affiliateUrl;
   buy.dataset.productId = product.id;
   buy.addEventListener("click", () => trackClick(product));
+  const watch = node.querySelector(".watch");
+  watch.href = product.videoUrl;
   return node;
 }
 
