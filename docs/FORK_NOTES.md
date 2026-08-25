@@ -143,6 +143,25 @@ promo-shorts 는 [MoneyPrinterTurbo](https://github.com/harry0703/MoneyPrinterTu
 - AI는 자동차 실내·냄새 문제·청량한 배경 같은 **라이프스타일 배경만 생성**.
   검증된 실제 상품 대표 이미지를 전경에 합성한다.
 - 생성 배경도 렌더 QA 대상이며 실제 상품 효능을 암시하는 과장 표현은 금지.
+
+### 커머스 성과 원장·일일 갱신
+
+- SQLite `commerce_products`가 상품 식별자/영상 매핑의 단일 원장,
+  `commerce_snapshots`가 `youtube|coupang|market|naver` 원천별 시계열이다.
+- `scripts/commerce_daily.py`가 YouTube 조회·반응, 네이버 수요, 허브 가격
+  스냅샷을 수집하고 1·3·7일 수수료/EPC/전환율 랭킹을 계산한다.
+- 쿠팡 공식 API 승인 전 클릭·구매·수수료는 로그인 브라우저 리포트를
+  JSON으로 추출해 `--coupang-json`으로 적재한다. 임의 추정값 저장 금지.
+- macOS LaunchAgent `com.jemshorts.commerce-daily`가 매일 08:30 실행하며
+  로컬 결과는 `storage/commerce-metrics/YYYY-MM-DD.json`에 보관한다.
+
+### 검색 유입·비교 영상
+
+- `scripts/build_product_hub.py`가 상품별 canonical/OG/Product JSON-LD 페이지,
+  `sitemap.xml`, `robots.txt`를 생성한다. GitHub Pages 배포 전에 항상 실행.
+- 상품 3개/5개 누적 시 `scripts/commerce_roundup.py --top 3|5`로 7일 성과
+  순위 기반 비교 영상을 만든다. 단일 상품 쇼츠는 탐색 데이터 수집용으로
+  유지하고, 비교 영상은 검증된 활성 상품만 사용한다.
 - **Scrapling (BSD-3) 조건부 채택**: 네이버 공식 지역검색 API 로 부족할
   때의 보조 수집 카드. enrich 계층(PR #1)에 의존하므로 **PR #1 머지 후**
   config 옵션 플래그로 통합한다. 봇차단 우회는 약관 리스크 상존 — 기본

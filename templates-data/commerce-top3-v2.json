@@ -1,0 +1,20 @@
+{
+  "template_id": "commerce-top3-v2",
+  "name": "생활 꿀템 TOP3 비교",
+  "version": 2,
+  "mood": "energetic",
+  "autopilot": false,
+  "style_preset": "clean-product",
+  "voice": { "speed": 1.05 },
+  "timing": { "owner": "narration", "tolerance_s": 0.2 },
+  "structure": [
+    { "role": "hook", "duration_s": 3, "script_guide": "TOP3 선정 기준과 공통 문제를 한 문장으로 제시", "material_slot": "photo", "headline": { "template": "{roundup_title}", "show": true }, "shots": [{ "kind": "wide", "motion": "push-in" }, { "kind": "cutin", "crop": "center-zoom" }] },
+    { "role": "body", "duration_s": 5, "script_guide": "3위 상품명, 차별점, 현재 가격", "material_slot": "photo", "headline": { "template": "3위 {product_3}", "show": true } },
+    { "role": "body", "duration_s": 5, "script_guide": "2위 상품명, 차별점, 현재 가격", "material_slot": "photo", "headline": { "template": "2위 {product_2}", "show": true } },
+    { "role": "body", "duration_s": 5, "script_guide": "1위 상품명, 차별점, 현재 가격", "material_slot": "photo", "headline": { "template": "1위 {product_1}", "show": true } },
+    { "role": "cta", "duration_s": 4, "script_guide": "선택 기준과 채널 프로필 추천 제품 링크 안내", "material_slot": "photo", "headline": { "template": "{cta_text}", "show": true } }
+  ],
+  "total_duration_range": [20, 35],
+  "caption_template": "[광고] {roundup_title}. 실제 가격과 제품 정보는 채널 프로필의 추천 제품 링크에서 확인하세요.\n\n이 포스팅은 쿠팡 파트너스 활동의 일환으로, 이에 따른 일정액의 수수료를 제공받습니다.",
+  "hashtags_base": ["TOP3", "제품비교", "생활꿀템", "가성비", "제품추천"]
+}

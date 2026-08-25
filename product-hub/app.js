@@ -23,6 +23,7 @@ function renderProduct(product) {
   image.src = product.image;
   image.alt = `${product.name} 상품 이미지`;
   node.querySelector("h2").textContent = product.name;
+  node.querySelector(".details").href = `p/${product.id}.html`;
   node.querySelector(".summary").textContent = product.summary;
   node.querySelector(".price").textContent = product.priceText;
   node.querySelector(".updated").textContent = `정보 확인: ${product.checkedAt}`;

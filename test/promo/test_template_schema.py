@@ -34,6 +34,8 @@ SEED_IDS = {
     "upbeat-new-menu-v1",
     "calm-space-mood-v2",
     "commerce-pick-review-v2",
+    "commerce-top3-v2",
+    "commerce-top5-v2",
     "energetic-event-sale-v2",
     "upbeat-new-menu-v2",
 }
@@ -97,7 +99,7 @@ def test_bundled_seed_templates_all_pass_load_all():
     """번들 시드 5개가 전부 load_all 검증을 통과한다."""
     templates = load_all(BUNDLED_DIR)
 
-    assert len(templates) == 5
+    assert len(templates) == len(SEED_IDS)
     assert {t.template_id for t in templates} == SEED_IDS
     assert {t.mood for t in templates} == {"upbeat", "calm", "energetic"}
     for template in templates:
@@ -385,9 +387,9 @@ def test_commerce_seed_is_manual_only():
 
     assert templates["commerce-pick-review-v2"].autopilot is False
     assert all(
-        template.autopilot
+        not template.autopilot
         for template_id, template in templates.items()
-        if template_id != "commerce-pick-review-v2"
+        if template_id.startswith("commerce-")
     )
 
 
@@ -414,6 +416,8 @@ def test_bundled_seed_versions():
         "upbeat-new-menu-v1": 1,
         "calm-space-mood-v2": 2,
         "commerce-pick-review-v2": 2,
+        "commerce-top3-v2": 2,
+        "commerce-top5-v2": 2,
         "energetic-event-sale-v2": 2,
         "upbeat-new-menu-v2": 2,
     }
