@@ -123,6 +123,10 @@ promo-shorts 는 [MoneyPrinterTurbo](https://github.com/harry0703/MoneyPrinterTu
 8. `COMMENTED`: 제품 허브 링크와 쿠팡 파트너스 경제적 이해관계 문구를 댓글로 등록.
    Shorts 일반 URL은 클릭 불가임을 전제로 설명란에도 같은 링크를 유지.
 
+- **Shorts 자막 안전영역**: 프로모션 렌더는 `subtitle_position=custom`,
+  `custom_position=62.0` 고정. 렌더 파일의 하단이 비어 보여도 실제 Shorts
+  앱의 제목·채널·음원 UI가 하단 자막을 덮으므로 `bottom` 배치 금지.
+
 ### 링크 허브 원칙
 
 - 채널 프로필에는 제품별 링크를 계속 교체하지 않고 **공개 제품 허브 URL

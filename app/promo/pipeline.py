@@ -383,6 +383,10 @@ def build_video_params(plan: RenderPlan, *, n_threads: int = 1) -> VideoParams:
         bgm_file=pick_bgm_file(plan.template.mood),
         bgm_volume=0.2,
         subtitle_enabled=True,
+        # Shorts 하단에는 제목/채널/음원 UI 가 겹친다. 코어의 bottom 배치는
+        # 렌더 파일에서는 보여도 실제 앱에서 가려지므로 세로 62% 안전영역 사용.
+        subtitle_position="custom",
+        custom_position=62.0,
         font_name=plan.font_name,
         font_size=60,
         text_fore_color="#FFFFFF",
