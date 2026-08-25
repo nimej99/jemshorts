@@ -1,14 +1,16 @@
 """커머스 추천 원샷: 상품 정보 -> 브랜드킷 -> 스크립트 -> 렌더 -> 업로드.
 
-수동 작업은 '상품 선정 + 파트너스 링크 생성 + 이미지 2~3장' 뿐이고,
-나머지는 이 명령 하나로 끝난다. 템플릿은 commerce-pick-review-v2 고정
+상품 선별 결과의 대표 이미지를 신뢰 기준으로 삼고, 상세 이미지 후보는
+동일 상품 검증을 통과한 것만 사용한다. 상품 페이지의 전체 img 수집은
+추천상품이 섞이므로 금지한다. 템플릿은 commerce-pick-review-v2 고정
 (autopilot 제외 수동 전용 시드 — 캡션에 [광고] + 의무 문구 자동 포함).
 
 예시:
   uv run python scripts/commerce_pick.py \
     --product-name "차량용 방향제 디퓨저" \
     --link "https://link.coupang.com/XXXX" \
-    --images ./storage/promo_photos/a.jpg ./storage/promo_photos/b.jpg \
+    --primary-image ./storage/promo_photos/primary.jpg \
+    --images ./storage/promo_photos/detail-a.jpg \
     --description "고체형, 30일 지속, 송풍구 클립형" \
     --dry-run        # 렌더까지만, 업로드하지 않음
 
@@ -30,9 +32,10 @@ ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT_DIR)
 
 from app.promo import db as promo_db  # noqa: E402
-from app.promo import pipeline, plans, publish, uploads  # noqa: E402
+from app.promo import pipeline, plans, publish, uploads, youtube  # noqa: E402
 from app.promo.brandkit import store as brandkit_store  # noqa: E402
 from app.promo.brandkit.models import BrandKit, PromotionLink  # noqa: E402
+from app.promo.materials.product_images import validate_product_images  # noqa: E402
 from app.promo.research import build_script_prompt, parse_script_response  # noqa: E402
 from app.promo.templates.schema import load_raw, load_template  # noqa: E402
 from app.promo.templates.variables import required_variables  # noqa: E402
@@ -63,7 +66,17 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="커머스 추천 쇼츠 원샷 생성")
     parser.add_argument("--product-name", required=True, help="상품명 (캡션/헤드라인에 노출)")
     parser.add_argument("--link", required=True, help="파트너스 단축 링크 (link.coupang.com/...)")
-    parser.add_argument("--images", nargs="+", required=True, help="상품 이미지/클립 파일 경로 (2~3장 권장)")
+    parser.add_argument(
+        "--primary-image",
+        required=True,
+        help="상품 선별 결과에서 받은 대표 이미지 (신뢰 기준)",
+    )
+    parser.add_argument(
+        "--images",
+        nargs="*",
+        default=[],
+        help="동일 상품 상세 이미지 후보 (불일치 후보는 자동 제외)",
+    )
     parser.add_argument("--description", default="", help="상품 장점/설명 (스크립트 힌트로 사용)")
     parser.add_argument("--script", default="", help="내레이션 직접 지정 (없으면 LLM 생성)")
     parser.add_argument("--pain-point", default="", help="훅 헤드라인 변수 확정값")
@@ -73,16 +86,20 @@ def main() -> int:
     parser.add_argument("--force", action="store_true", help="일일 업로드 상한 무시")
     args = parser.parse_args()
 
-    for path in args.images:
-        if not os.path.isfile(path):
-            _fail(f"소재 파일이 없습니다: {path}")
+    images, image_checks = validate_product_images(args.primary_image, args.images)
+    for check in image_checks:
+        status = "통과" if check.accepted else f"제외({check.reason})"
+        print(
+            f"[commerce-pick] 이미지 검증 {status}: "
+            f"{os.path.basename(check.path)} similarity={check.similarity:.4f}"
+        )
 
     template_raw = load_raw(TEMPLATE_PATH)
     template = load_template(TEMPLATE_PATH)
     kit = BrandKit(
         business_name=args.product_name.strip(),
         description=args.description.strip(),
-        photos=[os.path.abspath(p) for p in args.images],
+        photos=images,
         promotion_links=[PromotionLink(label="구매", url=args.link.strip())],
         source="manual",
     )
@@ -160,11 +177,23 @@ def main() -> int:
         if not upload_result.get("success"):
             _fail(f"업로드 실패: {upload_result.get('error') or upload_result}")
         uploads.record_delivered(conn, task_id, template.template_id, description, hashtags)
+        purchase_comment = (
+            f"[광고] 구매 링크: {args.link.strip()}\n\n"
+            "이 댓글은 쿠팡 파트너스 활동의 일환으로, 이에 따른 일정액의 "
+            "수수료를 제공받습니다."
+        )
+        try:
+            engagement = youtube.wait_and_comment(title, purchase_comment)
+        except youtube.YoutubeEngagementError as exc:
+            # 영상은 이미 게시됐다. 댓글 실패를 전체 업로드 실패로 취급하면
+            # 재실행 때 같은 영상을 중복 게시하므로 경고로 수렴한다.
+            engagement = {"warning": str(exc)}
         plans.finish(conn, plan.plan_id, plans.STATUS_RENDERED, {
             "task_id": task_id, "videos": [video_path],
             "render_seconds": result.render_seconds,
         })
         print(f"[commerce-pick] 업로드 완료: {upload_result}")
+        print(f"[commerce-pick] 구매 댓글 완료: {engagement}")
         return 0
     finally:
         conn.close()
