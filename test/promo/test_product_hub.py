@@ -17,7 +17,12 @@ def test_hub_products_have_direct_affiliate_links_and_identity():
         assert product["productId"].isdigit()
         assert product["itemId"].isdigit()
         assert product["vendorItemId"].isdigit()
-        assert product["affiliateUrl"].startswith("https://link.coupang.com/")
+        assert product["offers"]
+        for offer in product["offers"]:
+            assert offer["merchant"]
+            assert isinstance(offer["price"], int) and offer["price"] > 0
+            assert offer["affiliateUrl"].startswith("https://")
+            assert offer["checkedAt"]
         assert product["videoUrl"].startswith("https://www.youtube.com/watch?v=")
         assert product["image"].startswith("https://")
         assert product["checkedAt"]
@@ -25,9 +30,10 @@ def test_hub_products_have_direct_affiliate_links_and_identity():
 
 def test_hub_shows_affiliate_disclosure_and_sponsored_link_attributes():
     html = (HUB / "index.html").read_text(encoding="utf-8")
+    script = (HUB / "app.js").read_text(encoding="utf-8")
     assert "[광고]" in html
     assert "쿠팡 파트너스 활동의 일환" in html
-    assert 'rel="sponsored nofollow noopener"' in html
+    assert 'buy.rel = "sponsored nofollow noopener"' in script
 
 
 def test_seo_builder_writes_product_pages_and_sitemap(tmp_path):

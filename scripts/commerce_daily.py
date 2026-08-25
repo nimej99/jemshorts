@@ -28,11 +28,6 @@ def _video_id(url: str) -> str:
     return parse_qs(urlparse(url).query).get("v", [""])[0]
 
 
-def _number(text: str) -> int:
-    values = re.findall(r"[\d,]+", text)
-    return int(values[-1].replace(",", "")) if values else 0
-
-
 def _review_count(summary: str) -> int:
     match = re.search(r"리뷰\s*([\d,]+)", summary)
     return int(match.group(1).replace(",", "")) if match else 0
@@ -47,6 +42,17 @@ def sync(*, products_path: Path, coupang_json: Path | None = None) -> dict:
     conn = db.connect()
     try:
         for item in products:
+            offers = sorted(
+                (
+                    offer
+                    for offer in item.get("offers", [])
+                    if offer.get("active", True)
+                ),
+                key=lambda offer: offer["price"],
+            )
+            if not offers:
+                raise ValueError(f"활성 판매 오퍼가 없습니다: {item['id']}")
+            primary_offer = offers[0]
             product = commerce_metrics.CommerceProduct(
                 product_key=item["id"],
                 product_id=item["productId"],
@@ -54,17 +60,32 @@ def sync(*, products_path: Path, coupang_json: Path | None = None) -> dict:
                 vendor_item_id=item["vendorItemId"],
                 name=item["name"],
                 category=(item.get("badges") or ["기타"])[0],
-                affiliate_url=item["affiliateUrl"],
+                affiliate_url=primary_offer["affiliateUrl"],
                 image_url=item["image"],
                 video_id=_video_id(item.get("videoUrl", "")),
                 active=item.get("active", True),
             )
             commerce_metrics.upsert_product(conn, product)
+            for offer in offers:
+                commerce_metrics.upsert_offer(
+                    conn,
+                    commerce_metrics.CommerceOffer(
+                        offer_key=f"{item['id']}:{offer['id']}",
+                        product_key=item["id"],
+                        merchant=offer["merchant"],
+                        price=int(offer["price"]),
+                        affiliate_url=offer["affiliateUrl"],
+                        checked_at=offer["checkedAt"],
+                        shipping_text=offer.get("shippingText", ""),
+                        commission_rate=offer.get("commissionRate"),
+                        active=offer.get("active", True),
+                    ),
+                )
             commerce_metrics.record_snapshot(
                 conn,
                 product.product_key,
                 "market",
-                price=_number(item.get("priceText", "")),
+                price=int(primary_offer["price"]),
                 available=product.active,
                 review_count=_review_count(item.get("summary", "")),
                 payload={"checkedAt": item.get("checkedAt")},

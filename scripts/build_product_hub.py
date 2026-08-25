@@ -4,18 +4,12 @@ from __future__ import annotations
 
 import html
 import json
-import re
 from pathlib import Path
-from urllib.parse import urlparse, parse_qs
+from urllib.parse import parse_qs, urlparse
 
 ROOT = Path(__file__).resolve().parents[1]
 HUB = ROOT / "product-hub"
 BASE_URL = "https://nimej99.github.io/jemshorts"
-
-
-def _price(text: str) -> str:
-    numbers = re.findall(r"[\d,]+", text)
-    return numbers[-1].replace(",", "") if numbers else "0"
 
 
 def _video_id(url: str) -> str:
@@ -25,10 +19,26 @@ def _video_id(url: str) -> str:
 def render_product(product: dict) -> str:
     name = html.escape(product["name"])
     summary = html.escape(product["summary"])
-    affiliate = html.escape(product["affiliateUrl"], quote=True)
     image = html.escape(product["image"], quote=True)
     video_id = html.escape(_video_id(product["videoUrl"]), quote=True)
     canonical = f"{BASE_URL}/p/{product['id']}.html"
+    offers = sorted(
+        (offer for offer in product.get("offers", []) if offer.get("active", True)),
+        key=lambda offer: offer["price"],
+    )
+    if not offers:
+        raise ValueError(f"활성 판매 오퍼가 없습니다: {product['id']}")
+    structured_offers = [
+        {
+            "@type": "Offer",
+            "seller": {"@type": "Organization", "name": offer["merchant"]},
+            "url": offer["affiliateUrl"],
+            "priceCurrency": "KRW",
+            "price": str(offer["price"]),
+            "availability": "https://schema.org/InStock",
+        }
+        for offer in offers
+    ]
     structured = {
         "@context": "https://schema.org",
         "@type": "Product",
@@ -37,13 +47,21 @@ def render_product(product: dict) -> str:
         "image": [product["image"]],
         "sku": product["itemId"],
         "offers": {
-            "@type": "Offer",
-            "url": product["affiliateUrl"],
+            "@type": "AggregateOffer",
             "priceCurrency": "KRW",
-            "price": _price(product["priceText"]),
-            "availability": "https://schema.org/InStock",
+            "lowPrice": str(offers[0]["price"]),
+            "highPrice": str(offers[-1]["price"]),
+            "offerCount": len(offers),
+            "offers": structured_offers,
         },
     }
+    offer_buttons = "".join(
+        f'<a class="buy" href="{html.escape(offer["affiliateUrl"], quote=True)}" '
+        'rel="sponsored nofollow noopener" target="_blank">'
+        f'{html.escape(offer["merchant"])} {html.escape(offer["priceText"])} 확인'
+        "</a>"
+        for offer in offers
+    )
     return f"""<!doctype html>
 <html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{name} 가격·리뷰·영상 | 젬쇼츠</title>
@@ -56,8 +74,8 @@ def render_product(product: dict) -> str:
 <header class="hero"><div class="logo">J</div><div><h1>{name}</h1><p>{summary}</p></div></header>
 <aside class="disclosure"><strong>[광고]</strong> 이 페이지는 쿠팡 파트너스 활동의 일환으로, 이에 따른 일정액의 수수료를 제공받습니다.</aside>
 <article class="card" style="margin-top:22px"><img class="product-image" src="{image}" alt="{name} 실제 상품 이미지"><div class="content">
-<h2>{name}</h2><p class="summary">{summary}</p><p class="price">{html.escape(product['priceText'])}</p>
-<div class="actions"><a class="buy" href="{affiliate}" rel="sponsored nofollow noopener" target="_blank">쿠팡에서 최신 가격 확인</a><a class="watch" href="{html.escape(product['videoUrl'], quote=True)}">YouTube 쇼츠 보기</a></div>
+<h2>{name}</h2><p class="summary">{summary}</p><p class="price">최저 {html.escape(offers[0]['priceText'])}</p>
+<div class="actions"><div class="offer-actions">{offer_buttons}</div><a class="watch" href="{html.escape(product['videoUrl'], quote=True)}">YouTube 쇼츠 보기</a></div>
 <p class="updated">정보 확인: {html.escape(product['checkedAt'])}</p></div></article>
 <section style="margin-top:22px"><h2>소개 영상</h2><iframe width="100%" height="420" src="https://www.youtube.com/embed/{video_id}" title="{name} 소개 영상" frameborder="0" allowfullscreen></iframe></section>
 <footer>가격과 재고는 판매처에서 변경될 수 있습니다. 구매 전 쿠팡의 최종 정보를 확인하세요.</footer></main></body></html>"""
