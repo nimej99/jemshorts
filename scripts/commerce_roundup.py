@@ -38,14 +38,33 @@ def _short_name(name: str, limit: int = 18) -> str:
     return name if len(name) <= limit else name[: limit - 1] + "…"
 
 
+def _offers(product: dict) -> list[dict]:
+    return sorted(
+        (
+            offer
+            for offer in product.get("offers", [])
+            if offer.get("active", True)
+        ),
+        key=lambda offer: offer["price"],
+    )
+
+
+def _best_offer(product: dict) -> dict:
+    offers = _offers(product)
+    if not offers:
+        raise ValueError(f"활성 판매 오퍼가 없습니다: {product['id']}")
+    return offers[0]
+
+
 def _build_script(ranked: list[dict], title: str) -> str:
     count = len(ranked)
     sentences = [f"검색 수요와 실제 반응으로 고른 {title}, 바로 확인해 볼게요."]
     for position, product in zip(range(count, 0, -1), reversed(ranked)):
         feature = product["summary"].split("·")[0].strip()
+        offer = _best_offer(product)
         sentences.append(
             f"{position}위는 {_short_name(product['name'], 24)}. "
-            f"{feature}, 현재 {product['priceText']}입니다."
+            f"{feature}, 현재 최저 {offer['priceText']}입니다."
         )
     sentences.append("제품별 최신 정보는 채널 프로필의 추천 제품 링크에서 확인하세요.")
     return " ".join(sentences)
@@ -100,7 +119,10 @@ def main() -> int:
             description=" / ".join(item["summary"] for item in selected),
             photos=photos,
             promotion_links=[
-                PromotionLink(label=_short_name(item["name"]), url=item["affiliateUrl"])
+                PromotionLink(
+                    label=f"{_short_name(item['name'])} 최저가",
+                    url=_best_offer(item)["affiliateUrl"],
+                )
                 for item in selected
             ],
             source="commerce-roundup",
@@ -129,7 +151,10 @@ def main() -> int:
         video_path = result.videos[0]
         hub_url = str(config.app.get("product_hub_url", "")).strip()
         direct = "\n".join(
-            f"▶ {item['name']}: {item['affiliateUrl']}" for item in selected
+            f"▶ {item['name']} ({offer['merchant']} {offer['priceText']}): "
+            f"{offer['affiliateUrl']}"
+            for item in selected
+            for offer in _offers(item)
         )
         description = (
             f"[광고] {title}\n\n{direct}\n\n▶ 전체 제품 모아보기: {hub_url}\n\n"

@@ -61,3 +61,34 @@ def test_ranks_actual_commission_before_views(tmp_path):
     ranked = commerce_metrics.rank_products(conn, days=7, now=NOW)
 
     assert [item["product_key"] for item in ranked] == ["money", "views"]
+
+
+def test_offers_are_sorted_by_viewer_price(tmp_path):
+    conn = db.connect(tmp_path / "offers.db")
+    commerce_metrics.upsert_product(conn, _product())
+    commerce_metrics.upsert_offer(
+        conn,
+        commerce_metrics.CommerceOffer(
+            offer_key="p1:naver",
+            product_key="p1",
+            merchant="네이버",
+            price=12000,
+            affiliate_url="https://shopping.naver.com/x",
+            checked_at="2026-08-25",
+        ),
+    )
+    commerce_metrics.upsert_offer(
+        conn,
+        commerce_metrics.CommerceOffer(
+            offer_key="p1:coupang",
+            product_key="p1",
+            merchant="쿠팡",
+            price=9900,
+            affiliate_url="https://link.coupang.com/a/x",
+            checked_at="2026-08-25",
+        ),
+    )
+
+    offers = commerce_metrics.offers_for_product(conn, "p1")
+
+    assert [offer["merchant"] for offer in offers] == ["쿠팡", "네이버"]

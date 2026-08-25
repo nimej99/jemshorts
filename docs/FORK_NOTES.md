@@ -148,6 +148,12 @@ promo-shorts 는 [MoneyPrinterTurbo](https://github.com/harry0703/MoneyPrinterTu
 
 - SQLite `commerce_products`가 상품 식별자/영상 매핑의 단일 원장,
   `commerce_snapshots`가 `youtube|coupang|market|naver` 원천별 시계열이다.
+- `commerce_offers`는 같은 상품의 쿠팡·네이버 쇼핑 커넥트 등 판매처별
+  가격·배송·제휴 URL·수수료율을 보관한다. 허브는 활성 오퍼를 소비자가
+  실제 지불할 가격 오름차순으로 전부 표시하고 최저가를 명시한다.
+- 운영 순위는 소비자에게 보이는 최저가와 별개다. 시청자에게 특정 판매처를
+  숨기거나 수수료가 높은 링크만 노출하지 않고, 내부에서는 판매처별 실제
+  EPC·전환율·수수료를 비교한다.
 - `scripts/commerce_daily.py`가 YouTube 조회·반응, 네이버 수요, 허브 가격
   스냅샷을 수집하고 1·3·7일 수수료/EPC/전환율 랭킹을 계산한다.
 - 쿠팡 공식 API 승인 전 클릭·구매·수수료는 로그인 브라우저 리포트를

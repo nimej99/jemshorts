@@ -22,6 +22,19 @@ class CommerceProduct:
     active: bool = True
 
 
+@dataclass(frozen=True)
+class CommerceOffer:
+    offer_key: str
+    product_key: str
+    merchant: str
+    price: int
+    affiliate_url: str
+    checked_at: str
+    shipping_text: str = ""
+    commission_rate: float | None = None
+    active: bool = True
+
+
 def upsert_product(conn: sqlite3.Connection, product: CommerceProduct) -> None:
     conn.execute(
         """
@@ -55,6 +68,50 @@ def upsert_product(conn: sqlite3.Connection, product: CommerceProduct) -> None:
         ),
     )
     conn.commit()
+
+
+def upsert_offer(conn: sqlite3.Connection, offer: CommerceOffer) -> None:
+    conn.execute(
+        """
+        INSERT INTO commerce_offers (
+            offer_key, product_key, merchant, price, shipping_text,
+            affiliate_url, commission_rate, active, checked_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(offer_key) DO UPDATE SET
+            product_key=excluded.product_key,
+            merchant=excluded.merchant,
+            price=excluded.price,
+            shipping_text=excluded.shipping_text,
+            affiliate_url=excluded.affiliate_url,
+            commission_rate=excluded.commission_rate,
+            active=excluded.active,
+            checked_at=excluded.checked_at,
+            updated_at=datetime('now')
+        """,
+        (
+            offer.offer_key,
+            offer.product_key,
+            offer.merchant,
+            offer.price,
+            offer.shipping_text or None,
+            offer.affiliate_url,
+            offer.commission_rate,
+            int(offer.active),
+            offer.checked_at,
+        ),
+    )
+    conn.commit()
+
+
+def offers_for_product(conn: sqlite3.Connection, product_key: str) -> list[sqlite3.Row]:
+    return conn.execute(
+        """
+        SELECT * FROM commerce_offers
+        WHERE product_key=? AND active=1
+        ORDER BY price ASC, merchant ASC
+        """,
+        (product_key,),
+    ).fetchall()
 
 
 def record_snapshot(

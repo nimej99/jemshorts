@@ -27,6 +27,7 @@ h2 { margin: 12px 0 7px; font-size: 19px; line-height: 1.35; }
 .buy { display: block; padding: 12px 14px; border-radius: 12px; background: #ff4e50; color: white; text-align: center; text-decoration: none; font-weight: 800; }
 .buy:hover, .buy:focus-visible { background: #ff6c6e; }
 .actions { display: grid; gap: 8px; }
+.offer-actions { display: grid; gap: 8px; }
 .watch { display: block; padding: 10px 14px; border: 1px solid #52617f; border-radius: 12px; color: #dce7ff; text-align: center; text-decoration: none; font-weight: 700; font-size: 13px; }
 .watch:hover, .watch:focus-visible { background: #23304c; }
 .updated { margin: 9px 0 0; color: #7f8aa1; font-size: 11px; }

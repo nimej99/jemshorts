@@ -126,12 +126,34 @@ CREATE INDEX IF NOT EXISTS idx_commerce_snapshots_source_time
 ON commerce_snapshots(source, captured_at DESC);
 """
 
+# v6 스키마: 상품별 판매처/제휴 프로그램 오퍼. 가격은 시청자에게 전부 공개하고
+# 실제 수수료/EPC는 commerce_snapshots(source='coupang' 등)와 함께 판단한다.
+_V6 = """
+CREATE TABLE IF NOT EXISTS commerce_offers (
+    offer_key       TEXT PRIMARY KEY,
+    product_key     TEXT NOT NULL REFERENCES commerce_products(product_key)
+                    ON DELETE CASCADE,
+    merchant        TEXT NOT NULL,
+    price           INTEGER NOT NULL,
+    shipping_text   TEXT,
+    affiliate_url   TEXT NOT NULL,
+    commission_rate REAL,
+    active          INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0, 1)),
+    checked_at      TEXT NOT NULL,
+    updated_at      TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_commerce_offers_product_price
+ON commerce_offers(product_key, active, price);
+"""
+
 MIGRATIONS: list[str] = [
     _V1,
     _V2,
     _V3,
     _V4,
     _V5,
+    _V6,
 ]
 
 # 최신 스키마 버전 == 마이그레이션 개수 (user_version 목표값)
