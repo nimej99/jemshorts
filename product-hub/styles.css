@@ -20,6 +20,8 @@ h1 { margin: 0 0 5px; font-size: 27px; }
 .badges { display: flex; gap: 6px; flex-wrap: wrap; }
 .badge { padding: 4px 8px; border-radius: 999px; background: #253b65; color: #bdeaff; font-size: 12px; font-weight: 700; }
 h2 { margin: 12px 0 7px; font-size: 19px; line-height: 1.35; }
+.details { color: inherit; text-decoration: none; }
+.details:hover, .details:focus-visible { color: #8fe3ff; }
 .summary { margin: 0 0 12px; color: #bac4d7; font-size: 14px; line-height: 1.5; }
 .price { margin: 0 0 14px; color: #fff; font-size: 20px; font-weight: 800; }
 .buy { display: block; padding: 12px 14px; border-radius: 12px; background: #ff4e50; color: white; text-align: center; text-decoration: none; font-weight: 800; }

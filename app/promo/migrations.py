@@ -79,11 +79,59 @@ CREATE TABLE IF NOT EXISTS trends (
 CREATE INDEX IF NOT EXISTS idx_trends_fetched_at ON trends(fetched_at);
 """
 
+# v5 스키마: 커머스 상품 원장 + 원천별 시계열 성과 스냅샷.
+_V5 = """
+CREATE TABLE IF NOT EXISTS commerce_products (
+    product_key    TEXT PRIMARY KEY,
+    product_id     TEXT NOT NULL,
+    item_id        TEXT NOT NULL,
+    vendor_item_id TEXT NOT NULL,
+    name           TEXT NOT NULL,
+    category       TEXT NOT NULL,
+    affiliate_url  TEXT NOT NULL,
+    image_url      TEXT NOT NULL,
+    video_id       TEXT,
+    active         INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0, 1)),
+    created_at     TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at     TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS commerce_snapshots (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    product_key     TEXT NOT NULL REFERENCES commerce_products(product_key)
+                    ON DELETE CASCADE,
+    source          TEXT NOT NULL CHECK (
+                        source IN ('youtube', 'coupang', 'market', 'naver')
+                    ),
+    captured_at     TEXT NOT NULL,
+    price           INTEGER,
+    list_price      INTEGER,
+    available       INTEGER CHECK (available IN (0, 1)),
+    review_count    INTEGER,
+    demand_index    REAL,
+    supply_views    INTEGER,
+    video_views     INTEGER,
+    likes           INTEGER,
+    comments        INTEGER,
+    clicks          INTEGER,
+    orders_count    INTEGER,
+    sales_amount    INTEGER,
+    commission      INTEGER,
+    payload_json    TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_commerce_snapshots_product_time
+ON commerce_snapshots(product_key, captured_at DESC);
+CREATE INDEX IF NOT EXISTS idx_commerce_snapshots_source_time
+ON commerce_snapshots(source, captured_at DESC);
+"""
+
 MIGRATIONS: list[str] = [
     _V1,
     _V2,
     _V3,
     _V4,
+    _V5,
 ]
 
 # 최신 스키마 버전 == 마이그레이션 개수 (user_version 목표값)
