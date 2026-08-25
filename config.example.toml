@@ -277,6 +277,7 @@ youtube_oauth_client_id = ""
 youtube_oauth_client_secret = ""
 youtube_oauth_refresh_token = ""
 youtube_channel_id = ""
+product_hub_url = ""
 
 # =============================================================================
 # Promo Shorts (포크 신규 계층)

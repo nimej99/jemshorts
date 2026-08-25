@@ -39,6 +39,7 @@ from app.promo.materials.product_images import validate_product_images  # noqa: 
 from app.promo.research import build_script_prompt, parse_script_response  # noqa: E402
 from app.promo.templates.schema import load_raw, load_template  # noqa: E402
 from app.promo.templates.variables import required_variables  # noqa: E402
+from app.config import config  # noqa: E402
 from app.utils import utils  # noqa: E402
 
 TEMPLATE_PATH = os.path.join(ROOT_DIR, "templates-data", "commerce-pick-review-v2.json")
@@ -153,7 +154,11 @@ def main() -> int:
 
         # 5. 캡션/제목 구성 (캡션에 [광고] + 의무 문구 + 구매 링크 자동 포함)
         hashtags = [f"#{tag}" for tag in template.hashtags_base]
-        description = f"{pipeline.upload_caption(plan, kit)}\n\n{' '.join(hashtags)}"
+        hub_url = str(config.app.get("product_hub_url", "")).strip()
+        hub_line = f"\n\n▶ 영상 속 제품 모아보기: {hub_url}" if hub_url else ""
+        description = (
+            f"{pipeline.upload_caption(plan, kit)}{hub_line}\n\n{' '.join(hashtags)}"
+        )
         title = args.title.strip() or f"[광고] {args.product_name.strip()} 추천"
         print(f"[commerce-pick] 산출물: {video_path}")
         print(f"[commerce-pick] 제목: {title}")
@@ -177,8 +182,9 @@ def main() -> int:
         if not upload_result.get("success"):
             _fail(f"업로드 실패: {upload_result.get('error') or upload_result}")
         uploads.record_delivered(conn, task_id, template.template_id, description, hashtags)
+        comment_destination = hub_url or args.link.strip()
         purchase_comment = (
-            f"[광고] 구매 링크: {args.link.strip()}\n\n"
+            f"[광고] 영상 속 제품 확인: {comment_destination}\n\n"
             "이 댓글은 쿠팡 파트너스 활동의 일환으로, 이에 따른 일정액의 "
             "수수료를 제공받습니다."
         )

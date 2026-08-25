@@ -118,7 +118,9 @@ promo-shorts 는 [MoneyPrinterTurbo](https://github.com/harry0703/MoneyPrinterTu
    일치 여부 확인. 잘못된 상품 이미지 하나라도 있으면 게시 금지.
 6. `PUBLISHED`: Postiz 공개 API로 게시하고 YouTube 실제 videoId/채널/제목을
    oEmbed 또는 Data API로 검증.
-7. `COMMENTED`: 구매 링크와 쿠팡 파트너스 경제적 이해관계 문구를 댓글로 등록.
+7. `HUB_UPDATED`: 공개 제품 허브에 상품 식별자·검증 이미지·가격·파트너스
+   링크를 등록하고 배포 URL에서 실제 버튼 목적지를 확인.
+8. `COMMENTED`: 제품 허브 링크와 쿠팡 파트너스 경제적 이해관계 문구를 댓글로 등록.
    Shorts 일반 URL은 클릭 불가임을 전제로 설명란에도 같은 링크를 유지.
 
 ### 링크 허브 원칙
