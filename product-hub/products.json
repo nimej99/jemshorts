@@ -35,6 +35,17 @@
       "summary": "송풍구 클립형 · 향기 세기 조절 · 평점 4.5점, 리뷰 25,674개",
       "offers": [
         {
+          "id": "naver-shopping-connect",
+          "merchant": "네이버",
+          "price": 7180,
+          "priceText": "7,180원",
+          "shippingText": "",
+          "affiliateUrl": "https://naver.me/xk9pJlxx",
+          "commissionRate": 0.08,
+          "checkedAt": "2026-08-26",
+          "active": true
+        },
+        {
           "id": "coupang",
           "merchant": "쿠팡",
           "price": 8460,

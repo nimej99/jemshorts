@@ -81,6 +81,11 @@ def sync(*, products_path: Path, coupang_json: Path | None = None) -> dict:
                         active=offer.get("active", True),
                     ),
                 )
+            commerce_metrics.deactivate_missing_offers(
+                conn,
+                item["id"],
+                {f"{item['id']}:{offer['id']}" for offer in offers},
+            )
             commerce_metrics.record_snapshot(
                 conn,
                 product.product_key,

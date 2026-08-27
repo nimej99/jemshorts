@@ -114,6 +114,22 @@ def offers_for_product(conn: sqlite3.Connection, product_key: str) -> list[sqlit
     ).fetchall()
 
 
+def deactivate_missing_offers(
+    conn: sqlite3.Connection, product_key: str, retained_offer_keys: set[str]
+) -> None:
+    rows = conn.execute(
+        "SELECT offer_key FROM commerce_offers WHERE product_key=?", (product_key,)
+    ).fetchall()
+    stale = [row["offer_key"] for row in rows if row["offer_key"] not in retained_offer_keys]
+    if stale:
+        conn.executemany(
+            "UPDATE commerce_offers SET active=0, updated_at=datetime('now') "
+            "WHERE offer_key=?",
+            ((offer_key,) for offer_key in stale),
+        )
+        conn.commit()
+
+
 def record_snapshot(
     conn: sqlite3.Connection,
     product_key: str,
