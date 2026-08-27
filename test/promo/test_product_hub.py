@@ -33,6 +33,7 @@ def test_hub_shows_affiliate_disclosure_and_sponsored_link_attributes():
     script = (HUB / "app.js").read_text(encoding="utf-8")
     assert "[광고]" in html
     assert "쿠팡 파트너스 활동의 일환" in html
+    assert "네이버 쇼핑 커넥트 활동의 일환" in html
     assert 'buy.rel = "sponsored nofollow noopener"' in script
 
 

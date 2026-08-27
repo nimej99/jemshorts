@@ -16,13 +16,34 @@ def _feature(summary: str) -> str:
     return summary.split("·")[0].strip()
 
 
+def affiliate_disclosures(products: list[dict]) -> list[str]:
+    merchants = {
+        offer["merchant"]
+        for product in products
+        for offer in active_offers(product)
+    }
+    lines = []
+    if "쿠팡" in merchants:
+        lines.append(
+            "이 포스팅은 쿠팡 파트너스 활동의 일환으로, 이에 따른 일정액의 "
+            "수수료를 제공받습니다."
+        )
+    if "네이버" in merchants:
+        lines.append(
+            "이 포스팅은 네이버 쇼핑 커넥트 활동의 일환으로, 판매 발생 시 "
+            "수수료를 제공받습니다."
+        )
+    return lines
+
+
 def blog_markdown(products: list[dict], *, title: str, hub_url: str) -> str:
     if not products:
         raise ValueError("블로그 콘텐츠에 사용할 상품이 없습니다")
     lines = [
         f"# {title}",
         "",
-        "**[광고] 이 글에는 제휴 링크가 포함되어 있으며, 링크를 통한 구매 발생 시 일정액의 수수료를 제공받습니다.**",
+        "**[광고]**",
+        *(f"**{line}**" for line in affiliate_disclosures(products)),
         "",
         f"> 가격·재고 확인일: {date.today().isoformat()}  ",
         "> 판매처 가격은 수시로 달라질 수 있으므로 구매 전 최종 가격을 확인하세요.",
@@ -92,11 +113,11 @@ def clip_caption(product: dict, *, hub_url: str) -> str:
     best = offers[0]
     tags = ["제품추천", "생활꿀템", *product.get("badges", [])]
     hashtags = " ".join(f"#{tag.replace(' ', '')}" for tag in dict.fromkeys(tags))
+    disclosures = "\n".join(affiliate_disclosures([product]))
     return (
         f"[광고] {product['name']}\n"
         f"{product['summary']}\n"
         f"확인 시점 최저 {best['merchant']} {best['priceText']}\n\n"
         f"제품·판매처 비교: {hub_url}\n\n"
-        "이 콘텐츠에는 제휴 링크가 포함되어 있으며, 링크를 통한 구매 발생 시 "
-        f"일정액의 수수료를 제공받습니다.\n\n{hashtags}\n"
+        f"{disclosures}\n\n{hashtags}\n"
     )

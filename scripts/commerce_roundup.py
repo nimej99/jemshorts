@@ -15,7 +15,16 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from app.config import config  # noqa: E402
-from app.promo import commerce_metrics, db, pipeline, plans, publish, uploads, youtube  # noqa: E402
+from app.promo import (  # noqa: E402
+    commerce_metrics,
+    db,
+    distribution,
+    pipeline,
+    plans,
+    publish,
+    uploads,
+    youtube,
+)
 from app.promo.brandkit.models import BrandKit, PromotionLink  # noqa: E402
 from app.promo.templates.schema import load_raw, load_template  # noqa: E402
 from app.utils import utils  # noqa: E402
@@ -156,10 +165,10 @@ def main() -> int:
             for item in selected
             for offer in _offers(item)
         )
+        disclosures = "\n".join(distribution.affiliate_disclosures(selected))
         description = (
             f"[광고] {title}\n\n{direct}\n\n▶ 전체 제품 모아보기: {hub_url}\n\n"
-            "이 포스팅은 쿠팡 파트너스 활동의 일환으로, 이에 따른 일정액의 "
-            "수수료를 제공받습니다.\n\n#제품비교 #생활꿀템 #가성비 #TOP추천"
+            f"{disclosures}\n\n#제품비교 #생활꿀템 #가성비 #TOP추천"
         )
         print(json.dumps({"video": video_path, "script": script, "products": [p["id"] for p in selected]}, ensure_ascii=False, indent=2))
         if args.dry_run:
@@ -179,8 +188,7 @@ def main() -> int:
         uploads.record_delivered(conn, task_id, template.template_id, description, [])
         comment = (
             f"[광고] TOP{args.top} 제품은 채널 프로필의 추천 제품 링크에서 확인하세요.\n"
-            f"{hub_url}\n\n이 댓글은 쿠팡 파트너스 활동의 일환으로, 이에 따른 "
-            "일정액의 수수료를 제공받습니다."
+            f"{hub_url}\n\n{disclosures}"
         )
         try:
             youtube.wait_and_comment(f"[광고] {title}", comment)

@@ -92,3 +92,8 @@ def test_offers_are_sorted_by_viewer_price(tmp_path):
     offers = commerce_metrics.offers_for_product(conn, "p1")
 
     assert [offer["merchant"] for offer in offers] == ["쿠팡", "네이버"]
+
+    commerce_metrics.deactivate_missing_offers(conn, "p1", {"p1:coupang"})
+
+    offers = commerce_metrics.offers_for_product(conn, "p1")
+    assert [offer["merchant"] for offer in offers] == ["쿠팡"]

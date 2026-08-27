@@ -37,6 +37,7 @@ def test_blog_contains_comparison_disclosure_and_both_merchants():
 
     assert rendered.startswith("# 보조배터리 비교")
     assert "[광고]" in rendered
+    assert "네이버 쇼핑 커넥트 활동의 일환" in rendered
     assert "쿠팡 9,900원" in rendered
     assert "네이버 11,000원" in rendered
     assert "고르는 기준" in rendered
@@ -49,4 +50,5 @@ def test_clip_caption_uses_lowest_offer_and_affiliate_disclosure():
 
     assert "최저 쿠팡 9,900원" in rendered
     assert "일정액의 수수료" in rendered
+    assert "네이버 쇼핑 커넥트 활동의 일환" in rendered
     assert "#보조배터리" in rendered

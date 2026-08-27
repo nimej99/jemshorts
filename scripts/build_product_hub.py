@@ -72,7 +72,7 @@ def render_product(product: dict) -> str:
 <script type="application/ld+json">{json.dumps(structured, ensure_ascii=False)}</script></head>
 <body><main><p><a class="watch" href="../">← 전체 추천 제품</a></p>
 <header class="hero"><div class="logo">J</div><div><h1>{name}</h1><p>{summary}</p></div></header>
-<aside class="disclosure"><strong>[광고]</strong> 이 페이지는 쿠팡 파트너스 활동의 일환으로, 이에 따른 일정액의 수수료를 제공받습니다.</aside>
+<aside class="disclosure"><strong>[광고]</strong><br>이 포스팅은 쿠팡 파트너스 활동의 일환으로, 이에 따른 일정액의 수수료를 제공받습니다.<br>이 포스팅은 네이버 쇼핑 커넥트 활동의 일환으로, 판매 발생 시 수수료를 제공받습니다.</aside>
 <article class="card" style="margin-top:22px"><img class="product-image" src="{image}" alt="{name} 실제 상품 이미지"><div class="content">
 <h2>{name}</h2><p class="summary">{summary}</p><p class="price">최저 {html.escape(offers[0]['priceText'])}</p>
 <div class="actions"><div class="offer-actions">{offer_buttons}</div><a class="watch" href="{html.escape(product['videoUrl'], quote=True)}">YouTube 쇼츠 보기</a></div>
