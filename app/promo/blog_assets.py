@@ -11,7 +11,7 @@ from app.promo.commerce_policy import ALLOWED_PRODUCT_COUNTS
 
 WIDTH = 1080
 HEIGHT = 1350
-FONT = "/System/Library/Fonts/AppleSDGothicNeo.ttc"
+FONT = str(Path(__file__).resolve().parents[2] / "resource/fonts/NotoSansKR-Bold.otf")
 
 
 @dataclass(frozen=True)
@@ -24,7 +24,7 @@ class CoverQA:
 
 
 def _font(size: int, bold: bool = False) -> ImageFont.FreeTypeFont:
-    return ImageFont.truetype(FONT, size=size, index=1 if bold else 0)
+    return ImageFont.truetype(FONT, size=size)
 
 
 def _fit(draw: ImageDraw.ImageDraw, text: str, max_width: int, start: int) -> ImageFont.FreeTypeFont:
