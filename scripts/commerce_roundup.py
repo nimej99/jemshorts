@@ -65,9 +65,24 @@ def _best_offer(product: dict) -> dict:
     return offers[0]
 
 
-def _build_script(ranked: list[dict], title: str) -> str:
+def _evidence_hook(products: list[dict], title: str) -> str:
+    savings = [
+        offers[1]["price"] - offers[0]["price"]
+        for product in products
+        if len(offers := _offers(product)) >= 2
+        and offers[1]["price"] > offers[0]["price"]
+    ]
+    if savings:
+        return (
+            f"같은 상품인데 판매처만 바꿔도 최대 "
+            f"{max(savings):,}원 차이 납니다."
+        )
+    return f"리뷰 수만 보고 고르기 전에 {title}의 가격과 구성을 비교했습니다."
+
+
+def _build_script(ranked: list[dict], title: str, evidence_hook: str) -> str:
     count = len(ranked)
-    sentences = [f"검색 수요와 실제 반응으로 고른 {title}, 바로 확인해 볼게요."]
+    sentences = [evidence_hook]
     for position, product in zip(range(count, 0, -1), reversed(ranked)):
         feature = product["summary"].split("·")[0].strip()
         offer = _best_offer(product)
@@ -79,13 +94,19 @@ def _build_script(ranked: list[dict], title: str) -> str:
     return " ".join(sentences)
 
 
-def _select_products(conn, products: list[dict], count: int) -> list[dict]:
+def _select_products(
+    conn, products: list[dict], count: int, eligible_ids: list[str]
+) -> list[dict]:
     by_key = {product["id"]: product for product in products if product.get("active", True)}
+    eligible = {key for key in eligible_ids if key in by_key}
     ranked = commerce_metrics.rank_products(conn, days=7)
-    keys = [row["product_key"] for row in ranked if row["product_key"] in by_key]
-    keys.extend(key for key in by_key if key not in keys)
+    keys = [row["product_key"] for row in ranked if row["product_key"] in eligible]
+    keys.extend(key for key in eligible_ids if key in eligible and key not in keys)
     if len(keys) < count:
-        raise ValueError(f"활성 상품이 {len(keys)}개뿐이라 TOP{count}를 만들 수 없습니다")
+        raise ValueError(
+            f"선택한 컬렉션의 활성 상품이 {len(keys)}개뿐이라 "
+            f"TOP{count}를 만들 수 없습니다"
+        )
     return [by_key[key] for key in keys[:count]]
 
 
@@ -99,19 +120,37 @@ def main() -> int:
         help="기본 3(일일 TOP3), 주간 성과 결산은 5",
     )
     parser.add_argument("--title", default="")
+    parser.add_argument(
+        "--collection",
+        required=True,
+        help="products.json collections의 주제 ID. 무관한 상품 혼합 방지를 위해 필수",
+    )
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--force", action="store_true")
     args = parser.parse_args()
 
     products_path = ROOT / "product-hub" / "products.json"
-    products = json.loads(products_path.read_text(encoding="utf-8"))["products"]
+    catalog = json.loads(products_path.read_text(encoding="utf-8"))
+    products = catalog["products"]
+    collection = next(
+        (
+            item
+            for item in catalog.get("collections", [])
+            if item["id"] == args.collection and item.get("active", True)
+        ),
+        None,
+    )
+    if collection is None:
+        parser.error(f"활성 컬렉션을 찾을 수 없습니다: {args.collection}")
     conn = db.connect()
     try:
         try:
-            selected = _select_products(conn, products, args.top)
+            selected = _select_products(
+                conn, products, args.top, collection["productIds"]
+            )
         except ValueError as exc:
             parser.error(str(exc))
-        title = args.title.strip() or f"가성비 생활 꿀템 TOP{args.top}"
+        title = args.title.strip() or f"{collection['title']} TOP{args.top}"
         template_path = ROOT / "templates-data" / f"commerce-top{args.top}-v2.json"
         template_raw = load_raw(str(template_path))
         template = load_template(str(template_path))
@@ -138,11 +177,12 @@ def main() -> int:
         )
         variables = {
             "roundup_title": title,
+            "evidence_hook": _evidence_hook(selected, title),
             "cta_text": "채널 프로필 추천 제품",
         }
         for rank, item in enumerate(selected, start=1):
             variables[f"product_{rank}"] = _short_name(item["name"])
-        script = _build_script(selected, title)
+        script = _build_script(selected, title, variables["evidence_hook"])
         local_dir = utils.storage_dir("local_videos", create=True)
         plan = pipeline.plan_render(
             template, kit, [], script, local_dir, variables=variables

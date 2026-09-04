@@ -8,7 +8,7 @@
   "voice": { "speed": 1.05 },
   "timing": { "owner": "narration", "tolerance_s": 0.2 },
   "structure": [
-    { "role": "hook", "duration_s": 3, "script_guide": "TOP3 선정 기준과 공통 문제를 한 문장으로 제시", "material_slot": "photo", "headline": { "template": "{roundup_title}", "show": true }, "shots": [{ "kind": "wide", "motion": "push-in" }, { "kind": "cutin", "crop": "center-zoom" }] },
+    { "role": "hook", "duration_s": 3, "script_guide": "검증된 가격 차이·구성 차이·반복 리뷰 불만 중 하나를 손해 회피형 한 문장으로 제시", "material_slot": "photo", "headline": { "template": "{evidence_hook}", "show": true }, "shots": [{ "kind": "wide", "motion": "push-in" }, { "kind": "cutin", "crop": "center-zoom" }] },
     { "role": "body", "duration_s": 5, "script_guide": "3위 상품명, 차별점, 현재 가격", "material_slot": "photo", "headline": { "template": "3위 {product_3}", "show": true } },
     { "role": "body", "duration_s": 5, "script_guide": "2위 상품명, 차별점, 현재 가격", "material_slot": "photo", "headline": { "template": "2위 {product_2}", "show": true } },
     { "role": "body", "duration_s": 5, "script_guide": "1위 상품명, 차별점, 현재 가격", "material_slot": "photo", "headline": { "template": "1위 {product_1}", "show": true } },

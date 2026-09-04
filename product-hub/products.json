@@ -1,5 +1,18 @@
 {
   "schemaVersion": 1,
+  "offerFreshnessDays": 3,
+  "collections": [
+    {
+      "id": "manwon-life-items",
+      "title": "1만원대 생활 꿀템",
+      "description": "확인 가격이 1만원 안팎인 서로 다른 생활 문제 해결 제품 모음",
+      "productIds": [
+        "coupang-7869821820-22087730176",
+        "coupang-9619038817-28723002079"
+      ],
+      "active": true
+    }
+  ],
   "products": [
     {
       "id": "coupang-7869821820-22087730176",

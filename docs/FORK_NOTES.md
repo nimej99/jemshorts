@@ -166,10 +166,17 @@ promo-shorts 는 [MoneyPrinterTurbo](https://github.com/harry0703/MoneyPrinterTu
 - `scripts/build_product_hub.py`가 상품별 canonical/OG/Product JSON-LD 페이지,
   `sitemap.xml`, `robots.txt`를 생성한다. GitHub Pages 배포 전에 항상 실행.
 - **쿠팡 쇼츠 기본 단위는 일일 TOP3**:
-  `scripts/commerce_roundup.py` (`--top` 기본값 3). 수요 갭이 큰 한 주제를
+  `scripts/commerce_roundup.py --collection <주제 ID>` (`--top` 기본값 3).
+  수요 갭이 큰 한 주제를
   고른 뒤 그 주제에서 상품 3개를 잠그고, 각 상품의 식별자·대표 이미지·링크를
   독립 검증한 후 3위→1위 순으로 소개한다.
-- **TOP5는 주간 결산**: `scripts/commerce_roundup.py --top 5`. 7일 실제
+- `--collection`은 필수이며 `product-hub/products.json`의 `collections`
+  항목만 허용한다. 전역 성과순으로 무관한 카테고리 상품을 섞지 않는다.
+- 훅은 같은 상품의 판매처별 실측 가격 차이, 옵션/구성 차이, 출처가 확인된
+  반복 리뷰 불만만 사용한다. 개인 사용담·커뮤니티 사연·구매 경험을 꾸며내지
+  않는다. 검증된 갈등과 손해 회피를 사용하되 근거를 화면과 설명에 남긴다.
+- **TOP5는 주간 결산**:
+  `scripts/commerce_roundup.py --collection <주제 ID> --top 5`. 7일 실제
   수수료/EPC 우선 순위의 활성 상품만 사용한다.
 - 단일 상품 `scripts/commerce_pick.py`는 가격 급락·신상품·TOP3 우승 상품의
   심화 리뷰에만 사용한다. 무조건 단일 상품 1개씩 게시하는 운영은 금지한다.
