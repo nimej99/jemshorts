@@ -1,3 +1,7 @@
+from copy import deepcopy
+
+import pytest
+
 from app.promo import distribution
 
 
@@ -28,14 +32,20 @@ PRODUCT = {
         },
     ],
 }
+PRODUCTS = []
+for number in range(1, 6):
+    product = deepcopy(PRODUCT)
+    product["id"] = f"p{number}"
+    product["name"] = f"테스트 보조배터리 {number}"
+    PRODUCTS.append(product)
 
 
 def test_blog_contains_comparison_disclosure_and_both_merchants():
     rendered = distribution.blog_markdown(
-        [PRODUCT], title="보조배터리 비교", hub_url="https://hub.example"
+        PRODUCTS[:3], title="보조배터리 TOP3", hub_url="https://hub.example"
     )
 
-    assert rendered.startswith("# 보조배터리 비교")
+    assert rendered.startswith("# 보조배터리 TOP3")
     assert "[광고]" in rendered
     assert "네이버 쇼핑 커넥트 활동의 일환" in rendered
     assert "쿠팡 9,900원" in rendered
@@ -46,9 +56,19 @@ def test_blog_contains_comparison_disclosure_and_both_merchants():
 
 
 def test_clip_caption_uses_lowest_offer_and_affiliate_disclosure():
-    rendered = distribution.clip_caption(PRODUCT, hub_url="https://hub.example")
+    rendered = distribution.clip_caption(
+        PRODUCTS[:3], title="보조배터리 TOP3", hub_url="https://hub.example"
+    )
 
-    assert "최저 쿠팡 9,900원" in rendered
+    assert "1위 테스트 보조배터리 1 — 쿠팡 9,900원" in rendered
     assert "일정액의 수수료" in rendered
     assert "네이버 쇼핑 커넥트 활동의 일환" in rendered
     assert "#보조배터리" in rendered
+
+
+@pytest.mark.parametrize("count", [0, 1, 2, 4])
+def test_distribution_rejects_non_top3_or_top5_product_counts(count):
+    with pytest.raises(ValueError, match="3개 또는 5개"):
+        distribution.blog_markdown(
+            PRODUCTS[:count], title="금지된 묶음", hub_url="https://hub.example"
+        )

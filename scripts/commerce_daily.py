@@ -40,6 +40,7 @@ def _load_products(path: Path) -> list[dict]:
 def sync(*, products_path: Path, coupang_json: Path | None = None) -> dict:
     products = _load_products(products_path)
     conn = db.connect()
+    errors: list[dict[str, str]] = []
     try:
         for item in products:
             offers = sorted(
@@ -53,11 +54,15 @@ def sync(*, products_path: Path, coupang_json: Path | None = None) -> dict:
             if not offers:
                 raise ValueError(f"활성 판매 오퍼가 없습니다: {item['id']}")
             primary_offer = offers[0]
+            identity = item.get("identity") or {}
+            product_id = item.get("productId") or identity.get("affiliateProductId")
+            item_id = item.get("itemId") or identity.get("channelProductNo")
+            vendor_item_id = item.get("vendorItemId") or item_id
             product = commerce_metrics.CommerceProduct(
                 product_key=item["id"],
-                product_id=item["productId"],
-                item_id=item["itemId"],
-                vendor_item_id=item["vendorItemId"],
+                product_id=str(product_id),
+                item_id=str(item_id),
+                vendor_item_id=str(vendor_item_id),
                 name=item["name"],
                 category=(item.get("badges") or ["기타"])[0],
                 affiliate_url=primary_offer["affiliateUrl"],
@@ -102,34 +107,47 @@ def sync(*, products_path: Path, coupang_json: Path | None = None) -> dict:
             if _video_id(item.get("videoUrl", ""))
         }
         if video_map and youtube.configured():
-            token = youtube._access_token()
-            response = requests.get(
-                f"{youtube.API_URL}/videos",
-                headers={"Authorization": f"Bearer {token}"},
-                params={"part": "statistics,status", "id": ",".join(video_map)},
-                timeout=30,
-            )
-            response.raise_for_status()
-            for video in response.json().get("items", []):
-                stats = video.get("statistics", {})
-                commerce_metrics.record_snapshot(
-                    conn,
-                    video_map[video["id"]],
-                    "youtube",
-                    video_views=int(stats.get("viewCount", 0)),
-                    likes=int(stats.get("likeCount", 0)),
-                    comments=int(stats.get("commentCount", 0)),
-                    payload={"privacy": video.get("status", {}).get("privacyStatus")},
+            try:
+                token = youtube._access_token()
+                response = requests.get(
+                    f"{youtube.API_URL}/videos",
+                    headers={"Authorization": f"Bearer {token}"},
+                    params={"part": "statistics,status", "id": ",".join(video_map)},
+                    timeout=30,
                 )
+                response.raise_for_status()
+                for video in response.json().get("items", []):
+                    stats = video.get("statistics", {})
+                    commerce_metrics.record_snapshot(
+                        conn,
+                        video_map[video["id"]],
+                        "youtube",
+                        video_views=int(stats.get("viewCount", 0)),
+                        likes=int(stats.get("likeCount", 0)),
+                        comments=int(stats.get("commentCount", 0)),
+                        payload={
+                            "privacy": video.get("status", {}).get("privacyStatus")
+                        },
+                    )
+            except Exception as exc:
+                errors.append({"source": "youtube", "error": str(exc)})
 
         if datalab.configured():
-            keywords = [item["name"] for item in products if item.get("active", True)]
-            demand = datalab.fetch_demand(keywords)
-            for item in products:
-                if item["name"] in demand:
-                    commerce_metrics.record_snapshot(
-                        conn, item["id"], "naver", demand_index=demand[item["name"]]
-                    )
+            try:
+                keywords = [
+                    item["name"] for item in products if item.get("active", True)
+                ]
+                demand = datalab.fetch_demand(keywords)
+                for item in products:
+                    if item["name"] in demand:
+                        commerce_metrics.record_snapshot(
+                            conn,
+                            item["id"],
+                            "naver",
+                            demand_index=demand[item["name"]],
+                        )
+            except Exception as exc:
+                errors.append({"source": "naver", "error": str(exc)})
 
         if coupang_json:
             rows = json.loads(coupang_json.read_text(encoding="utf-8"))
@@ -145,10 +163,12 @@ def sync(*, products_path: Path, coupang_json: Path | None = None) -> dict:
                     payload=row,
                 )
 
-        return {
+        result = {
             str(days): commerce_metrics.rank_products(conn, days=days)
             for days in (1, 3, 7)
         }
+        result["_errors"] = errors
+        return result
     finally:
         conn.close()
 

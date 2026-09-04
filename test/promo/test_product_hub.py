@@ -22,18 +22,35 @@ def test_hub_products_have_direct_affiliate_links_and_identity():
         assert set(collection["productIds"]) <= product_ids
 
     for product in data["products"]:
-        assert product["productId"].isdigit()
-        assert product["itemId"].isdigit()
-        assert product["vendorItemId"].isdigit()
+        if "identity" in product:
+            assert product["identity"]["scheme"] == "naver-shopping-connect"
+            assert product["identity"]["affiliateProductId"].isdigit()
+            assert product["identity"]["channelProductNo"].isdigit()
+        else:
+            assert product["productId"].isdigit()
+            assert product["itemId"].isdigit()
+            assert product["vendorItemId"].isdigit()
         assert product["offers"]
         for offer in product["offers"]:
             assert offer["merchant"]
             assert isinstance(offer["price"], int) and offer["price"] > 0
             assert offer["affiliateUrl"].startswith("https://")
             assert offer["checkedAt"]
-        assert product["videoUrl"].startswith("https://www.youtube.com/watch?v=")
+        assert not product["videoUrl"] or product["videoUrl"].startswith(
+            "https://www.youtube.com/watch?v="
+        )
         assert product["image"].startswith("https://")
         assert product["checkedAt"]
+
+
+def test_latest_research_selects_an_existing_top3_collection():
+    catalog = json.loads((HUB / "products.json").read_text(encoding="utf-8"))
+    research = json.loads((HUB / "research.json").read_text(encoding="utf-8"))
+
+    collection_ids = {collection["id"] for collection in catalog["collections"]}
+    assert research["selectedCollection"] in collection_ids
+    assert research["results"][0]["keyword"] == "온습도계"
+    assert research["results"][0]["score"] >= research["results"][1]["score"]
 
 
 def test_hub_shows_affiliate_disclosure_and_sponsored_link_attributes():
@@ -52,25 +69,32 @@ def test_seo_builder_writes_product_pages_and_sitemap(tmp_path):
         (tmp_path / name).write_bytes((HUB / name).read_bytes())
     pages = build(tmp_path)
 
-    assert len(pages) == 3
-    page = next(path for path in pages if path.parent.name == "p").read_text(
-        encoding="utf-8"
-    )
+    assert len(pages) == 7
+    product_pages = [
+        path.read_text(encoding="utf-8")
+        for path in pages
+        if path.parent.name == "p"
+    ]
+    page = product_pages[0]
     assert '"@type": "Product"' in page
     assert "쿠팡 파트너스 활동의 일환" in page
-    assert "youtube.com/embed/" in page
+    assert any("youtube.com/embed/" in product_page for product_page in product_pages)
     collection = next(path for path in pages if path.parent.name == "c").read_text(
         encoding="utf-8"
     )
     assert '"@type": "ItemList"' in collection
+    assert "blog.naver.com/jemshorts/" in collection
     assert "sitemap.xml" in (tmp_path / "robots.txt").read_text(encoding="utf-8")
 
 
 def test_stale_offer_is_not_advertised_as_current_structured_price():
     from scripts.build_product_hub import render_product
 
+    products = json.loads((HUB / "products.json").read_text(encoding="utf-8"))[
+        "products"
+    ]
     product = deepcopy(
-        json.loads((HUB / "products.json").read_text(encoding="utf-8"))["products"][1]
+        next(product for product in products if "페브리즈" in product["name"])
     )
     for offer in product["offers"]:
         offer["checkedAt"] = "2000-01-01"
@@ -84,8 +108,11 @@ def test_stale_offer_is_not_advertised_as_current_structured_price():
 def test_fresh_competing_offers_show_savings_and_aggregate_offer():
     from scripts.build_product_hub import render_product
 
+    products = json.loads((HUB / "products.json").read_text(encoding="utf-8"))[
+        "products"
+    ]
     product = deepcopy(
-        json.loads((HUB / "products.json").read_text(encoding="utf-8"))["products"][1]
+        next(product for product in products if "페브리즈" in product["name"])
     )
     for offer in product["offers"]:
         offer["checkedAt"] = date.today().isoformat()

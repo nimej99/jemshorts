@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from datetime import date
 
+from app.promo.commerce_policy import ALLOWED_PRODUCT_COUNTS
+
 
 def active_offers(product: dict) -> list[dict]:
     return sorted(
@@ -37,8 +39,10 @@ def affiliate_disclosures(products: list[dict]) -> list[str]:
 
 
 def blog_markdown(products: list[dict], *, title: str, hub_url: str) -> str:
-    if not products:
-        raise ValueError("블로그 콘텐츠에 사용할 상품이 없습니다")
+    if len(products) not in ALLOWED_PRODUCT_COUNTS:
+        raise ValueError(
+            f"블로그 콘텐츠는 상품 3개 또는 5개가 필요합니다 (현재 {len(products)}개)"
+        )
     lines = [
         f"# {title}",
         "",
@@ -73,9 +77,10 @@ def blog_markdown(products: list[dict], *, title: str, hub_url: str) -> str:
                 "",
                 product["summary"],
                 "",
-                f"- 소개 영상: {product['videoUrl']}",
             ]
         )
+        if product.get("videoUrl"):
+            lines.append(f"- 소개 영상: {product['videoUrl']}")
         for offer in offers:
             shipping = f" · {offer.get('shippingText')}" if offer.get("shippingText") else ""
             lines.append(
@@ -87,7 +92,7 @@ def blog_markdown(products: list[dict], *, title: str, hub_url: str) -> str:
         [
             "## 고르는 기준",
             "",
-            "1. 필요한 기능과 용량을 먼저 정합니다.",
+            "1. 사용할 장소와 필요한 핵심 기능을 먼저 정합니다.",
             "2. 표시 가격뿐 아니라 배송비와 구성품을 함께 확인합니다.",
             "3. 리뷰 수는 참고하되 최근 리뷰의 반복 불만을 확인합니다.",
             "4. 같은 상품도 판매처별 최종 결제 금액을 비교합니다.",
@@ -106,18 +111,30 @@ def blog_markdown(products: list[dict], *, title: str, hub_url: str) -> str:
     return "\n".join(lines) + "\n"
 
 
-def clip_caption(product: dict, *, hub_url: str) -> str:
-    offers = active_offers(product)
-    if not offers:
-        raise ValueError(f"활성 판매 오퍼가 없습니다: {product['id']}")
-    best = offers[0]
-    tags = ["제품추천", "생활꿀템", *product.get("badges", [])]
+def clip_caption(products: list[dict], *, title: str, hub_url: str) -> str:
+    if len(products) not in ALLOWED_PRODUCT_COUNTS:
+        raise ValueError(
+            f"클립 콘텐츠는 상품 3개 또는 5개가 필요합니다 (현재 {len(products)}개)"
+        )
+    lines = [f"[광고] {title}"]
+    for rank, product in enumerate(products, start=1):
+        offers = active_offers(product)
+        if not offers:
+            raise ValueError(f"활성 판매 오퍼가 없습니다: {product['id']}")
+        best = offers[0]
+        lines.append(
+            f"{rank}위 {product['name']} — {best['merchant']} {best['priceText']}"
+        )
+    tags = [
+        "TOP3" if len(products) == 3 else "TOP5",
+        "제품비교",
+        "생활꿀템",
+        *(badge for product in products for badge in product.get("badges", [])),
+    ]
     hashtags = " ".join(f"#{tag.replace(' ', '')}" for tag in dict.fromkeys(tags))
-    disclosures = "\n".join(affiliate_disclosures([product]))
+    disclosures = "\n".join(affiliate_disclosures(products))
     return (
-        f"[광고] {product['name']}\n"
-        f"{product['summary']}\n"
-        f"확인 시점 최저 {best['merchant']} {best['priceText']}\n\n"
-        f"제품·판매처 비교: {hub_url}\n\n"
-        f"{disclosures}\n\n{hashtags}\n"
+        "\n".join(lines)
+        + f"\n\n제품·판매처 비교: {hub_url}\n\n"
+        + f"{disclosures}\n\n{hashtags}\n"
     )

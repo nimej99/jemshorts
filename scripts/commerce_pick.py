@@ -1,4 +1,4 @@
-"""단일 상품 예외 쇼츠: 상품 정보 -> 브랜드킷 -> 스크립트 -> 렌더 -> 업로드.
+"""단일 상품 조사/렌더 도구: 상품 정보 -> 브랜드킷 -> 스크립트 -> 로컬 렌더.
 
 상품 선별 결과의 대표 이미지를 신뢰 기준으로 삼고, 상세 이미지 후보는
 동일 상품 검증을 통과한 것만 사용한다. 상품 페이지의 전체 img 수집은
@@ -6,7 +6,7 @@
 (autopilot 제외 수동 전용 시드 — 캡션에 [광고] + 의무 문구 자동 포함).
 
 기본 커머스 게시 경로는 `scripts/commerce_roundup.py`의 일일 TOP3다.
-이 스크립트는 가격 급락, 신상품, TOP3 우승 상품의 심화 리뷰에만 사용한다.
+공개 발행은 지원하지 않는다. 검증 소재 확보와 TOP3 후보별 사전 렌더에만 쓴다.
 
 예시:
   uv run python scripts/commerce_pick.py \
@@ -35,7 +35,7 @@ ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT_DIR)
 
 from app.promo import db as promo_db  # noqa: E402
-from app.promo import pipeline, plans, publish, uploads, youtube  # noqa: E402
+from app.promo import pipeline, plans  # noqa: E402
 from app.promo.brandkit import store as brandkit_store  # noqa: E402
 from app.promo.brandkit.models import BrandKit, PromotionLink  # noqa: E402
 from app.promo.materials.product_images import validate_product_images  # noqa: E402
@@ -86,8 +86,11 @@ def main() -> int:
     parser.add_argument("--pain-point", default="", help="훅 헤드라인 변수 확정값")
     parser.add_argument("--price-deal", default="", help="CTA 헤드라인 변수 확정값")
     parser.add_argument("--title", default="", help="업로드 제목 (기본: [광고] {상품명} 추천)")
-    parser.add_argument("--dry-run", action="store_true", help="렌더까지만, 업로드하지 않음")
-    parser.add_argument("--force", action="store_true", help="일일 업로드 상한 무시")
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="호환용 플래그. 단일 상품은 항상 로컬 렌더만 수행",
+    )
     args = parser.parse_args()
 
     images, image_checks = validate_product_images(args.primary_image, args.images)
@@ -167,42 +170,11 @@ def main() -> int:
         print(f"[commerce-pick] 제목: {title}")
         print(f"[commerce-pick] 캡션:\n{description}\n")
 
-        if args.dry_run:
-            print("[commerce-pick] dry-run — 업로드 생략")
-            return 0
-
-        # 6. 업로드 (일일 상한 준수)
-        if uploads.cap_reached(conn) and not args.force:
-            _fail(
-                f"일일 업로드 상한 도달 ({uploads.count_delivered_today(conn)}/"
-                f"{uploads.daily_cap()}) — 내일 다시 실행하거나 --force"
-            )
-        upload_result = publish.publish_video(
-            video_path, title, description,
-            [tag.lstrip("#") for tag in hashtags],
-            privacy_status="public", platforms=["youtube"],
-        )
-        if not upload_result.get("success"):
-            _fail(f"업로드 실패: {upload_result.get('error') or upload_result}")
-        uploads.record_delivered(conn, task_id, template.template_id, description, hashtags)
-        comment_destination = hub_url or args.link.strip()
-        purchase_comment = (
-            f"[광고] 영상 속 제품 확인: {comment_destination}\n\n"
-            "이 댓글은 쿠팡 파트너스 활동의 일환으로, 이에 따른 일정액의 "
-            "수수료를 제공받습니다."
-        )
-        try:
-            engagement = youtube.wait_and_comment(title, purchase_comment)
-        except youtube.YoutubeEngagementError as exc:
-            # 영상은 이미 게시됐다. 댓글 실패를 전체 업로드 실패로 취급하면
-            # 재실행 때 같은 영상을 중복 게시하므로 경고로 수렴한다.
-            engagement = {"warning": str(exc)}
         plans.finish(conn, plan.plan_id, plans.STATUS_RENDERED, {
             "task_id": task_id, "videos": [video_path],
             "render_seconds": result.render_seconds,
         })
-        print(f"[commerce-pick] 업로드 완료: {upload_result}")
-        print(f"[commerce-pick] 구매 댓글 완료: {engagement}")
+        print("[commerce-pick] 단일 상품 공개 발행 금지 — 로컬 렌더만 완료")
         return 0
     finally:
         conn.close()
