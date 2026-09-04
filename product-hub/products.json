@@ -3,6 +3,19 @@
   "offerFreshnessDays": 3,
   "collections": [
     {
+      "id": "hygrometer-fall-top3",
+      "title": "환절기 실내 온습도계 TOP3",
+      "description": "가성비형·정확도형·백라이트형으로 나눠 고른 실내 온습도계 3개",
+      "blogUrl": "https://blog.naver.com/jemshorts/224401366318",
+      "publishedAt": "2026-09-04",
+      "productIds": [
+        "naver-805658096308544-9847329126",
+        "naver-805935200949997-3422617747",
+        "naver-867873273154881-115945317"
+      ],
+      "active": true
+    },
+    {
       "id": "manwon-life-items",
       "title": "1만원대 생활 꿀템",
       "description": "확인 가격이 1만원 안팎인 서로 다른 생활 문제 해결 제품 모음",
@@ -14,6 +27,90 @@
     }
   ],
   "products": [
+    {
+      "id": "naver-805658096308544-9847329126",
+      "identity": {
+        "scheme": "naver-shopping-connect",
+        "affiliateProductId": "805658096308544",
+        "channelProductNo": "9847329126"
+      },
+      "name": "카스 백라이트 초정밀 디지털 온습도계 T035",
+      "summary": "백라이트 · 자석/스탠드/벽걸이 · 평점 4.89점, 리뷰 4,547개",
+      "offers": [
+        {
+          "id": "naver-shopping-connect",
+          "merchant": "네이버",
+          "price": 21800,
+          "priceText": "21,800원",
+          "shippingText": "",
+          "affiliateUrl": "https://naver.me/FdqrbmKK",
+          "commissionRate": 0.18,
+          "checkedAt": "2026-09-04",
+          "active": true
+        }
+      ],
+      "videoUrl": "",
+      "image": "https://dthumb-phinf.pstatic.net/?src=%22https%3A%2F%2Fshop-phinf.pstatic.net%2F20240120_164%2F17056935680555XoxN_JPEG%2F106829463766663668_1484678201.jpg%22&type=brandconnect_f500_500_product",
+      "badges": ["온습도계", "백라이트"],
+      "checkedAt": "2026-09-04",
+      "active": true
+    },
+    {
+      "id": "naver-805935200949997-3422617747",
+      "identity": {
+        "scheme": "naver-shopping-connect",
+        "affiliateProductId": "805935200949997",
+        "channelProductNo": "3422617747"
+      },
+      "name": "노바리빙 프리미엄 디지털 온습도계 ML0758",
+      "summary": "스위스 센서 · 벽걸이 겸용 · 평점 4.83점, 리뷰 7,673개",
+      "offers": [
+        {
+          "id": "naver-shopping-connect",
+          "merchant": "네이버",
+          "price": 16000,
+          "priceText": "16,000원",
+          "shippingText": "",
+          "affiliateUrl": "https://naver.me/xiL34aQA",
+          "commissionRate": 0.05,
+          "checkedAt": "2026-09-04",
+          "active": true
+        }
+      ],
+      "videoUrl": "",
+      "image": "https://dthumb-phinf.pstatic.net/?src=%22https%3A%2F%2Fshop-phinf.pstatic.net%2F20250905_160%2F1757039267034G0jDX_JPEG%2F62180155184253416_98754384.jpg%22&type=brandconnect_f500_500_product",
+      "badges": ["온습도계", "스위스 센서"],
+      "checkedAt": "2026-09-04",
+      "active": true
+    },
+    {
+      "id": "naver-867873273154881-115945317",
+      "identity": {
+        "scheme": "naver-shopping-connect",
+        "affiliateProductId": "867873273154881",
+        "channelProductNo": "115945317"
+      },
+      "name": "실내 미니 디지털 온습도계 ST-1",
+      "summary": "미니 디지털 · 탁상/냉장고용 · 평점 4.68점, 리뷰 15,497개",
+      "offers": [
+        {
+          "id": "naver-shopping-connect",
+          "merchant": "네이버",
+          "price": 5900,
+          "priceText": "5,900원",
+          "shippingText": "",
+          "affiliateUrl": "https://naver.me/xy7smYVB",
+          "commissionRate": 0.14,
+          "checkedAt": "2026-09-04",
+          "active": true
+        }
+      ],
+      "videoUrl": "",
+      "image": "https://dthumb-phinf.pstatic.net/?src=%22https%3A%2F%2Fshop-phinf.pstatic.net%2F20181213_227%2Fzoaaa_1544685678095AzuYB_JPEG%2F67992837715312849_1076211837.jpg%22&type=brandconnect_f500_500_product",
+      "badges": ["온습도계", "가성비"],
+      "checkedAt": "2026-09-04",
+      "active": true
+    },
     {
       "id": "coupang-7869821820-22087730176",
       "productId": "7869821820",

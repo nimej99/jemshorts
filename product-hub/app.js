@@ -83,7 +83,11 @@ function renderProduct(product, freshnessDays) {
     offerActions.appendChild(buy);
   }
   const watch = node.querySelector(".watch");
-  watch.href = product.videoUrl;
+  if (product.videoUrl) {
+    watch.href = product.videoUrl;
+  } else {
+    watch.remove();
+  }
   return node;
 }
 

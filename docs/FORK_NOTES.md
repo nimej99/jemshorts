@@ -178,13 +178,16 @@ promo-shorts 는 [MoneyPrinterTurbo](https://github.com/harry0703/MoneyPrinterTu
 - **TOP5는 주간 결산**:
   `scripts/commerce_roundup.py --collection <주제 ID> --top 5`. 7일 실제
   수수료/EPC 우선 순위의 활성 상품만 사용한다.
-- 단일 상품 `scripts/commerce_pick.py`는 가격 급락·신상품·TOP3 우승 상품의
-  심화 리뷰에만 사용한다. 무조건 단일 상품 1개씩 게시하는 운영은 금지한다.
+- 단일 상품 `scripts/commerce_pick.py`는 후보별 소재 검증과 로컬 사전
+  렌더만 수행한다. 공개 업로드 코드는 제거되어 있으며 단일·2개 상품 공개
+  콘텐츠는 모든 채널에서 금지한다.
 
 ### 네이버 블로그·클립 재가공
 
-- `scripts/commerce_repurpose.py`가 동일 원장에서 네이버 블로그용 비교 글과
-  상품별 클립 캡션·원본 MP4 묶음을 생성한다.
+- `scripts/commerce_repurpose.py --collection <주제 ID>`가 동일 TOP3/TOP5
+  원장에서 네이버 블로그 비교 글과 클립 캡션·원본 MP4 묶음을 생성한다.
+- `--qa-approved`가 없으면 manifest의 `publication_ready`는 false이며
+  후속 게시기가 발행해서는 안 된다.
 - 블로그는 영상 대본 복붙이 아니라 비교표, 판매처별 링크, 구매 기준, FAQ,
   가격 확인일을 포함한다. 광고/제휴 고지는 글 첫 부분에 둔다.
 - 클립은 상품별 문제·가격·허브 CTA 문법을 사용한다. 네이버 쇼핑 커넥트

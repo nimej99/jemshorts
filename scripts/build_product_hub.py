@@ -43,7 +43,10 @@ def render_product(product: dict, freshness_days: int = 3) -> str:
     name = html.escape(product["name"])
     summary = html.escape(product["summary"])
     image = html.escape(product["image"], quote=True)
-    video_id = html.escape(_video_id(product["videoUrl"]), quote=True)
+    video_url = product.get("videoUrl", "")
+    video_id = html.escape(_video_id(video_url), quote=True)
+    identity = product.get("identity") or {}
+    sku = product.get("itemId") or identity.get("channelProductNo") or product["id"]
     canonical = f"{BASE_URL}/p/{product['id']}.html"
     offers = _all_offers(product)
     if not offers:
@@ -56,7 +59,7 @@ def render_product(product: dict, freshness_days: int = 3) -> str:
         "name": product["name"],
         "description": product["summary"],
         "image": [product["image"]],
-        "sku": product["itemId"],
+        "sku": sku,
     }
     if fresh:
         structured_offers = [
@@ -102,6 +105,19 @@ def render_product(product: dict, freshness_days: int = 3) -> str:
             '<p class="price-note stale">가격 확인일이 지나 판매처에서 '
             "최신 가격을 다시 확인하세요.</p>"
         )
+    video_action = (
+        f'<a class="watch" href="{html.escape(video_url, quote=True)}">'
+        "YouTube 쇼츠 보기</a>"
+        if video_url
+        else ""
+    )
+    video_section = (
+        f'<section style="margin-top:22px"><h2>소개 영상</h2><iframe width="100%" '
+        f'height="420" src="https://www.youtube.com/embed/{video_id}" '
+        f'title="{name} 소개 영상" frameborder="0" allowfullscreen></iframe></section>'
+        if video_id
+        else ""
+    )
     return f"""<!doctype html>
 <html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{name} 가격·리뷰·영상 | 젬쇼츠</title>
@@ -115,9 +131,9 @@ def render_product(product: dict, freshness_days: int = 3) -> str:
 <aside class="disclosure"><strong>[광고]</strong><br>이 포스팅은 쿠팡 파트너스 활동의 일환으로, 이에 따른 일정액의 수수료를 제공받습니다.<br>이 포스팅은 네이버 쇼핑 커넥트 활동의 일환으로, 판매 발생 시 수수료를 제공받습니다.</aside>
 <article class="card" style="margin-top:22px"><img class="product-image" src="{image}" alt="{name} 실제 상품 이미지"><div class="content">
 <h2>{name}</h2><p class="summary">{summary}</p><p class="price">{price_label}</p>{price_note}
-<div class="actions"><div class="offer-actions">{offer_buttons}</div><a class="watch" href="{html.escape(product['videoUrl'], quote=True)}">YouTube 쇼츠 보기</a></div>
+<div class="actions"><div class="offer-actions">{offer_buttons}</div>{video_action}</div>
 <p class="updated">가격 확인: {html.escape(displayed[0]['checkedAt'])}</p></div></article>
-<section style="margin-top:22px"><h2>소개 영상</h2><iframe width="100%" height="420" src="https://www.youtube.com/embed/{video_id}" title="{name} 소개 영상" frameborder="0" allowfullscreen></iframe></section>
+{video_section}
 <footer>가격과 재고는 판매처에서 변경될 수 있습니다. 구매 전 판매처의 최종 정보를 확인하세요.</footer></main></body></html>"""
 
 
@@ -149,6 +165,13 @@ def render_collection(collection: dict, products: list[dict]) -> str:
         f'<a class="watch" href="../p/{product["id"]}.html">가격·판매처 비교</a></div></article>'
         for index, product in enumerate(products, start=1)
     )
+    blog_link = (
+        f'<p style="margin-top:18px"><a class="buy" '
+        f'href="{html.escape(collection["blogUrl"], quote=True)}" '
+        'rel="noopener" target="_blank">네이버 TOP3 비교 글 보기</a></p>'
+        if collection.get("blogUrl")
+        else ""
+    )
     return f"""<!doctype html>
 <html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{title} 비교·추천 | 젬쇼츠</title><meta name="description" content="{description}">
@@ -159,6 +182,7 @@ def render_collection(collection: dict, products: list[dict]) -> str:
 <header class="hero"><div class="logo">J</div><div><h1>{title}</h1><p>{description}</p></div></header>
 <aside class="disclosure"><strong>[광고]</strong> 이 페이지에는 제휴 링크가 포함되어 판매 발생 시 수수료를 제공받습니다.</aside>
 <section class="products">{cards}</section>
+{blog_link}
 <footer>같은 검색 의도와 가격 조건으로 묶은 제품입니다. 구매 전 최신 가격을 확인하세요.</footer>
 </main></body></html>"""
 

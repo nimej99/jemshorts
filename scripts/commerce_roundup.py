@@ -16,6 +16,7 @@ sys.path.insert(0, str(ROOT))
 
 from app.config import config  # noqa: E402
 from app.promo import (  # noqa: E402
+    commerce_policy,
     commerce_metrics,
     db,
     distribution,
@@ -126,6 +127,11 @@ def main() -> int:
         help="products.json collections의 주제 ID. 무관한 상품 혼합 방지를 위해 필수",
     )
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument(
+        "--qa-approved",
+        action="store_true",
+        help="기술 QA 후 훅·본문·CTA 시각 검수를 통과한 경우에만 지정",
+    )
     parser.add_argument("--force", action="store_true")
     args = parser.parse_args()
 
@@ -213,6 +219,11 @@ def main() -> int:
         print(json.dumps({"video": video_path, "script": script, "products": [p["id"] for p in selected]}, ensure_ascii=False, indent=2))
         if args.dry_run:
             return 0
+        commerce_policy.require_publication(
+            selected,
+            collection=collection,
+            qa_passed=args.qa_approved,
+        )
         if uploads.cap_reached(conn) and not args.force:
             raise RuntimeError("일일 업로드 상한 도달 — --force 없이 게시하지 않습니다")
         upload = publish.publish_video(

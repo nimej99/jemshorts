@@ -1,0 +1,146 @@
+{
+  "schemaVersion": 1,
+  "researchedAt": "2026-09-04",
+  "market": "KR",
+  "demandSource": "Naver DataLab search trend",
+  "supplySource": "YouTube yt-dlp top 8 view sum",
+  "scoreFormula": "demand / (1 + sqrt(top_view_sum))",
+  "selectedCollection": "hygrometer-fall-top3",
+  "results": [
+    {
+      "keyword": "온습도계",
+      "demand": 46.83,
+      "videos": 8,
+      "top_view_sum": 74583,
+      "top_view_max": 29599,
+      "score": 0.17,
+      "error": null
+    },
+    {
+      "keyword": "보냉백",
+      "demand": 61.3,
+      "videos": 8,
+      "top_view_sum": 450058,
+      "top_view_max": 425268,
+      "score": 0.09,
+      "error": null
+    },
+    {
+      "keyword": "리빙박스",
+      "demand": 76.57,
+      "videos": 8,
+      "top_view_sum": 938915,
+      "top_view_max": 860293,
+      "score": 0.08,
+      "error": null
+    },
+    {
+      "keyword": "차렵이불",
+      "demand": 23.13,
+      "videos": 8,
+      "top_view_sum": 94694,
+      "top_view_max": 37776,
+      "score": 0.07,
+      "error": null
+    },
+    {
+      "keyword": "밀폐용기",
+      "demand": 20.57,
+      "videos": 8,
+      "top_view_sum": 1873575,
+      "top_view_max": 1491528,
+      "score": 0.02,
+      "error": null
+    },
+    {
+      "keyword": "압축팩",
+      "demand": 16.77,
+      "videos": 8,
+      "top_view_sum": 724508,
+      "top_view_max": 350639,
+      "score": 0.02,
+      "error": null
+    },
+    {
+      "keyword": "미니가습기",
+      "demand": 18.82,
+      "videos": 8,
+      "top_view_sum": 890653,
+      "top_view_max": 803221,
+      "score": 0.02,
+      "error": null
+    },
+    {
+      "keyword": "무릎담요",
+      "demand": 7.47,
+      "videos": 8,
+      "top_view_sum": 388920,
+      "top_view_max": 288160,
+      "score": 0.01,
+      "error": null
+    },
+    {
+      "keyword": "이불정리함",
+      "demand": 11.01,
+      "videos": 8,
+      "top_view_sum": 1227268,
+      "top_view_max": 833749,
+      "score": 0.01,
+      "error": null
+    },
+    {
+      "keyword": "텀블러",
+      "demand": 19.5,
+      "videos": 8,
+      "top_view_sum": 2888107,
+      "top_view_max": 908006,
+      "score": 0.01,
+      "error": null
+    },
+    {
+      "keyword": "차량용 방향제",
+      "demand": 11.07,
+      "videos": 8,
+      "top_view_sum": 1025587,
+      "top_view_max": 633438,
+      "score": 0.01,
+      "error": null
+    },
+    {
+      "keyword": "가을이불",
+      "demand": 2.56,
+      "videos": 8,
+      "top_view_sum": 417964,
+      "top_view_max": 347147,
+      "score": 0.0,
+      "error": null
+    },
+    {
+      "keyword": "보온병",
+      "demand": 1.32,
+      "videos": 8,
+      "top_view_sum": 710349,
+      "top_view_max": 315707,
+      "score": 0.0,
+      "error": null
+    },
+    {
+      "keyword": "보온도시락",
+      "demand": 1.97,
+      "videos": 8,
+      "top_view_sum": 353629,
+      "top_view_max": 250635,
+      "score": 0.0,
+      "error": null
+    },
+    {
+      "keyword": "세탁조 클리너",
+      "demand": 3.02,
+      "videos": 8,
+      "top_view_sum": 7004555,
+      "top_view_max": 4362817,
+      "score": 0.0,
+      "error": null
+    }
+  ]
+}
