@@ -1,6 +1,7 @@
 {
   "schemaVersion": 1,
   "offerFreshnessDays": 3,
+  "directAffiliateLinks": false,
   "collections": [
     {
       "id": "hygrometer-fall-top3",
@@ -23,7 +24,7 @@
         "coupang-7869821820-22087730176",
         "coupang-9619038817-28723002079"
       ],
-      "active": true
+      "active": false
     }
   ],
   "products": [

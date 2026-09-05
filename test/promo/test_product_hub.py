@@ -20,6 +20,8 @@ def test_hub_products_have_direct_affiliate_links_and_identity():
     for collection in data["collections"]:
         assert collection["productIds"]
         assert set(collection["productIds"]) <= product_ids
+        if collection.get("active", True):
+            assert len(collection["productIds"]) in (3, 5)
 
     for product in data["products"]:
         if "identity" in product:
@@ -60,6 +62,8 @@ def test_hub_shows_affiliate_disclosure_and_sponsored_link_attributes():
     assert "쿠팡 파트너스 활동의 일환" in html
     assert "네이버 쇼핑 커넥트 활동의 일환" in html
     assert 'buy.rel = "sponsored nofollow noopener"' in script
+    assert "featuredCollection" in script
+    assert "new Set(collection.productIds).size" in script
 
 
 def test_seo_builder_writes_product_pages_and_sitemap(tmp_path):
@@ -69,21 +73,15 @@ def test_seo_builder_writes_product_pages_and_sitemap(tmp_path):
         (tmp_path / name).write_bytes((HUB / name).read_bytes())
     pages = build(tmp_path)
 
-    assert len(pages) == 7
-    product_pages = [
-        path.read_text(encoding="utf-8")
-        for path in pages
-        if path.parent.name == "p"
-    ]
-    page = product_pages[0]
-    assert '"@type": "Product"' in page
-    assert "쿠팡 파트너스 활동의 일환" in page
-    assert any("youtube.com/embed/" in product_page for product_page in product_pages)
+    assert len(pages) == 1
+    assert not list((tmp_path / "p").glob("*.html"))
     collection = next(path for path in pages if path.parent.name == "c").read_text(
         encoding="utf-8"
     )
     assert '"@type": "ItemList"' in collection
     assert "blog.naver.com/jemshorts/" in collection
+    assert "/p/" not in collection
+    assert "네이버 블로그에서 TOP3·판매처 비교" in collection
     assert "sitemap.xml" in (tmp_path / "robots.txt").read_text(encoding="utf-8")
 
 

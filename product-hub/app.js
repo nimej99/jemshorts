@@ -26,13 +26,13 @@ function isFresh(offer, freshnessDays) {
   return ageMs <= freshnessDays * 86400000 && ageMs >= -86400000;
 }
 
-function renderProduct(product, freshnessDays) {
+function renderProduct(product, freshnessDays, collection, directAffiliateLinks) {
   const node = template.content.cloneNode(true);
   const image = node.querySelector(".product-image");
   image.src = product.image;
   image.alt = `${product.name} 상품 이미지`;
   node.querySelector("h2").textContent = product.name;
-  node.querySelector(".details").href = `p/${product.id}.html`;
+  node.querySelector(".details").href = `c/${collection.id}.html#${product.id}`;
   node.querySelector(".summary").textContent = product.summary;
   const offers = (product.offers || [])
     .filter(offer => offer.active !== false)
@@ -42,7 +42,9 @@ function renderProduct(product, freshnessDays) {
   const best = displayOffers[0];
   node.querySelector(".price").textContent = best
     ? freshOffers.length
-      ? `현재 최저 ${best.priceText}`
+      ? freshOffers.length >= 2
+        ? `확인 오퍼 중 낮은 가격 ${best.priceText}`
+        : `확인 가격 ${best.priceText}`
       : `최근 확인가 ${best.priceText}`
     : "판매 정보 확인 중";
   const priceNote = node.querySelector(".price-note");
@@ -70,15 +72,21 @@ function renderProduct(product, freshnessDays) {
 
   const offerActions = node.querySelector(".offer-actions");
   for (const offer of displayOffers) {
+    const destination = directAffiliateLinks
+      ? offer.affiliateUrl
+      : collection.blogUrl;
+    if (!destination) continue;
     const buy = document.createElement("a");
     buy.className = "buy";
-    buy.href = offer.affiliateUrl;
+    buy.href = destination;
     buy.rel = "sponsored nofollow noopener";
     buy.target = "_blank";
     buy.dataset.productId = product.id;
-    buy.textContent = freshOffers.length
-      ? `${offer.merchant} ${offer.priceText} 확인`
-      : `${offer.merchant} 최신 가격 다시 확인`;
+    buy.textContent = directAffiliateLinks
+      ? freshOffers.length
+        ? `${offer.merchant} ${offer.priceText} 확인`
+        : `${offer.merchant} 최신 가격 다시 확인`
+      : "네이버 블로그에서 TOP3 비교";
     buy.addEventListener("click", () => trackClick(product, offer));
     offerActions.appendChild(buy);
   }
@@ -96,18 +104,54 @@ fetch("products.json", { cache: "no-store" })
     if (!response.ok) throw new Error(`products.json: ${response.status}`);
     return response.json();
   })
-  .then(({ products, collections = [], offerFreshnessDays = 3 }) => {
-    for (const collection of collections.filter(item => item.active !== false)) {
+  .then(({
+    products,
+    collections = [],
+    offerFreshnessDays = 3,
+    directAffiliateLinks = false
+  }) => {
+    const eligibleProducts = products.filter(product =>
+      product.active !== false
+      && (product.offers || []).some(offer =>
+        offer.active !== false && isFresh(offer, offerFreshnessDays)
+      )
+    );
+    const productIds = new Set(eligibleProducts.map(product => product.id));
+    const validCounts = new Set([3, 5]);
+    const visibleCollections = collections.filter(collection =>
+      collection.active !== false
+      && validCounts.has(collection.productIds.length)
+      && new Set(collection.productIds).size === collection.productIds.length
+      && collection.productIds.every(productId => productIds.has(productId))
+    );
+    const featuredCollection = visibleCollections
+      .slice()
+      .sort((left, right) =>
+        String(right.publishedAt || "").localeCompare(String(left.publishedAt || ""))
+      )[0];
+    const visibleProductIds = new Set(
+      featuredCollection ? featuredCollection.productIds : []
+    );
+    for (const collection of visibleCollections) {
       const link = document.createElement("a");
       link.className = "collection-link";
       link.href = `c/${collection.id}.html`;
       link.textContent = collection.title;
       collectionContainer.appendChild(link);
     }
-    const visible = products.filter(product => product.active !== false);
+    const visible = eligibleProducts.filter(product =>
+      visibleProductIds.has(product.id)
+    );
     empty.hidden = visible.length > 0;
     for (const product of visible) {
-      container.appendChild(renderProduct(product, offerFreshnessDays));
+      container.appendChild(
+        renderProduct(
+          product,
+          offerFreshnessDays,
+          featuredCollection,
+          directAffiliateLinks
+        )
+      );
     }
   })
   .catch(error => {

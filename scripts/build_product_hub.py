@@ -84,18 +84,22 @@ def render_product(product: dict, freshness_days: int = 3) -> str:
     offer_buttons = "".join(
         f'<a class="buy" href="{html.escape(offer["affiliateUrl"], quote=True)}" '
         'rel="sponsored nofollow noopener" target="_blank">'
-        f'{html.escape(offer["merchant"])} '
-        f'{html.escape(offer["priceText"] + " 확인" if fresh else "최신 가격 다시 확인")}'
+        f"{html.escape(offer['merchant'])} "
+        f"{html.escape(offer['priceText'] + ' 확인' if fresh else '최신 가격 다시 확인')}"
         "</a>"
         for offer in displayed
     )
     if fresh:
-        price_label = f"현재 최저 {html.escape(fresh[0]['priceText'])}"
+        price_label = (
+            f"확인 오퍼 중 낮은 가격 {html.escape(fresh[0]['priceText'])}"
+            if len(fresh) >= 2
+            else f"확인 가격 {html.escape(fresh[0]['priceText'])}"
+        )
         if len(fresh) >= 2:
             savings = fresh[1]["price"] - fresh[0]["price"]
             price_note = (
                 f'<p class="price-note savings">{html.escape(fresh[0]["merchant"])}가 '
-                f'다음 판매처보다 {savings:,}원 저렴</p>'
+                f"다음 판매처보다 {savings:,}원 저렴</p>"
             )
         else:
             price_note = '<p class="price-note"></p>'
@@ -132,7 +136,7 @@ def render_product(product: dict, freshness_days: int = 3) -> str:
 <article class="card" style="margin-top:22px"><img class="product-image" src="{image}" alt="{name} 실제 상품 이미지"><div class="content">
 <h2>{name}</h2><p class="summary">{summary}</p><p class="price">{price_label}</p>{price_note}
 <div class="actions"><div class="offer-actions">{offer_buttons}</div>{video_action}</div>
-<p class="updated">가격 확인: {html.escape(displayed[0]['checkedAt'])}</p></div></article>
+<p class="updated">가격 확인: {html.escape(displayed[0]["checkedAt"])}</p></div></article>
 {video_section}
 <footer>가격과 재고는 판매처에서 변경될 수 있습니다. 구매 전 판매처의 최종 정보를 확인하세요.</footer></main></body></html>"""
 
@@ -151,18 +155,26 @@ def render_collection(collection: dict, products: list[dict]) -> str:
             {
                 "@type": "ListItem",
                 "position": index,
-                "url": f"{BASE_URL}/p/{product['id']}.html",
+                "url": f"{canonical}#{product['id']}",
                 "name": product["name"],
             }
             for index, product in enumerate(products, start=1)
         ],
     }
+    blog_url = html.escape(collection.get("blogUrl", ""), quote=True)
     cards = "".join(
-        f'<article class="card"><img class="product-image" src="{html.escape(product["image"], quote=True)}" '
+        f'<article id="{html.escape(product["id"], quote=True)}" class="card">'
+        f'<img class="product-image" src="{html.escape(product["image"], quote=True)}" '
         f'alt="{html.escape(product["name"])} 상품 이미지"><div class="content">'
-        f'<h2>{index}위 {html.escape(product["name"])}</h2>'
+        f"<h2>{index}위 {html.escape(product['name'])}</h2>"
         f'<p class="summary">{html.escape(product["summary"])}</p>'
-        f'<a class="watch" href="../p/{product["id"]}.html">가격·판매처 비교</a></div></article>'
+        + (
+            f'<a class="buy" href="{blog_url}" rel="noopener" target="_blank">'
+            "네이버 블로그에서 TOP3·판매처 비교</a>"
+            if blog_url
+            else ""
+        )
+        + "</div></article>"
         for index, product in enumerate(products, start=1)
     )
     blog_link = (
@@ -189,29 +201,34 @@ def render_collection(collection: dict, products: list[dict]) -> str:
 
 def build(hub_dir: Path = HUB) -> list[Path]:
     data = json.loads((hub_dir / "products.json").read_text(encoding="utf-8"))
-    products = [product for product in data["products"] if product.get("active", True)]
+    active_products = [
+        product for product in data["products"] if product.get("active", True)
+    ]
     freshness_days = int(data.get("offerFreshnessDays", 3))
-    by_id = {product["id"]: product for product in products}
+    by_id = {product["id"]: product for product in active_products}
+    collections = [
+        collection
+        for collection in data.get("collections", [])
+        if collection.get("active", True)
+        and len(collection.get("productIds") or []) in (3, 5)
+        and len(set(collection["productIds"])) == len(collection["productIds"])
+        and all(product_id in by_id for product_id in collection["productIds"])
+        and all(
+            _fresh_offers(by_id[product_id], freshness_days)
+            for product_id in collection["productIds"]
+        )
+    ]
     written: list[Path] = []
 
     pages = hub_dir / "p"
     pages.mkdir(exist_ok=True)
     for old in pages.glob("*.html"):
         old.unlink()
-    for product in products:
-        path = pages / f"{product['id']}.html"
-        path.write_text(render_product(product, freshness_days), encoding="utf-8")
-        written.append(path)
 
     collection_dir = hub_dir / "c"
     collection_dir.mkdir(exist_ok=True)
     for old in collection_dir.glob("*.html"):
         old.unlink()
-    collections = [
-        collection
-        for collection in data.get("collections", [])
-        if collection.get("active", True)
-    ]
     for collection in collections:
         members = [by_id[key] for key in collection["productIds"] if key in by_id]
         if not members:
@@ -222,7 +239,6 @@ def build(hub_dir: Path = HUB) -> list[Path]:
 
     urls = [
         f"{BASE_URL}/",
-        *(f"{BASE_URL}/p/{product['id']}.html" for product in products),
         *(f"{BASE_URL}/c/{collection['id']}.html" for collection in collections),
     ]
     sitemap = (
