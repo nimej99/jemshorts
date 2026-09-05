@@ -101,11 +101,11 @@ def sync(*, products_path: Path, coupang_json: Path | None = None) -> dict:
                 payload={"checkedAt": item.get("checkedAt")},
             )
 
-        video_map = {
-            _video_id(item.get("videoUrl", "")): item["id"]
-            for item in products
-            if _video_id(item.get("videoUrl", ""))
-        }
+        video_map: dict[str, list[str]] = {}
+        for item in products:
+            video_id = _video_id(item.get("videoUrl", ""))
+            if video_id:
+                video_map.setdefault(video_id, []).append(item["id"])
         if video_map and youtube.configured():
             try:
                 token = youtube._access_token()
@@ -118,17 +118,20 @@ def sync(*, products_path: Path, coupang_json: Path | None = None) -> dict:
                 response.raise_for_status()
                 for video in response.json().get("items", []):
                     stats = video.get("statistics", {})
-                    commerce_metrics.record_snapshot(
-                        conn,
-                        video_map[video["id"]],
-                        "youtube",
-                        video_views=int(stats.get("viewCount", 0)),
-                        likes=int(stats.get("likeCount", 0)),
-                        comments=int(stats.get("commentCount", 0)),
-                        payload={
-                            "privacy": video.get("status", {}).get("privacyStatus")
-                        },
-                    )
+                    for product_key in video_map[video["id"]]:
+                        commerce_metrics.record_snapshot(
+                            conn,
+                            product_key,
+                            "youtube",
+                            video_views=int(stats.get("viewCount", 0)),
+                            likes=int(stats.get("likeCount", 0)),
+                            comments=int(stats.get("commentCount", 0)),
+                            payload={
+                                "privacy": video.get("status", {}).get(
+                                    "privacyStatus"
+                                )
+                            },
+                        )
             except Exception as exc:
                 errors.append({"source": "youtube", "error": str(exc)})
 

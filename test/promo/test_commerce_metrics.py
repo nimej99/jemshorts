@@ -63,6 +63,30 @@ def test_ranks_actual_commission_before_views(tmp_path):
     assert [item["product_key"] for item in ranked] == ["money", "views"]
 
 
+def test_monotonic_counter_corrections_do_not_create_negative_growth(tmp_path):
+    conn = db.connect(tmp_path / "corrections.db")
+    commerce_metrics.upsert_product(conn, _product())
+    commerce_metrics.record_snapshot(
+        conn,
+        "p1",
+        "youtube",
+        captured_at="2026-08-18T12:00:00+00:00",
+        video_views=20,
+    )
+    commerce_metrics.record_snapshot(
+        conn,
+        "p1",
+        "youtube",
+        captured_at="2026-08-25T12:00:00+00:00",
+        video_views=14,
+    )
+
+    result = commerce_metrics.performance_window(conn, "p1", days=7, now=NOW)
+
+    assert result["youtube"]["video_views"]["current"] == 14
+    assert result["youtube"]["video_views"]["delta"] == 0
+
+
 def test_offers_are_sorted_by_viewer_price(tmp_path):
     conn = db.connect(tmp_path / "offers.db")
     commerce_metrics.upsert_product(conn, _product())

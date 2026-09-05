@@ -216,6 +216,7 @@ def performance_window(
         "youtube": ("video_views", "likes", "comments"),
         "coupang": ("clicks", "orders_count", "sales_amount", "commission"),
     }
+    monotonic_fields = {"video_views", "likes", "comments", "clicks"}
     for source, names in fields.items():
         latest = latest_snapshot(conn, product_key, source)
         prior = _at_or_before(conn, product_key, source, cutoff)
@@ -223,9 +224,10 @@ def performance_window(
         for name in names:
             latest_value = int((latest[name] if latest else 0) or 0)
             prior_value = int((prior[name] if prior else 0) or 0)
+            delta = latest_value - prior_value
             result[source][name] = {
                 "current": latest_value,
-                "delta": latest_value - prior_value,
+                "delta": max(0, delta) if name in monotonic_fields else delta,
             }
     clicks = result["coupang"]["clicks"]["delta"]
     orders = result["coupang"]["orders_count"]["delta"]
