@@ -48,7 +48,11 @@ def test_qa_rejects_wrong_resolution(tmp_path):
 
 
 def test_roundup_cover_requires_three_products_and_uses_checked_date(tmp_path):
-    from app.promo.blog_assets import build_roundup_cover
+    from app.promo.blog_assets import (
+        build_roundup_cover,
+        build_vertical_roundup_card,
+        qa_vertical_card,
+    )
 
     source = tmp_path / "product.jpg"
     Image.new("RGB", (1000, 1000), "white").save(source)
@@ -70,3 +74,15 @@ def test_roundup_cover_requires_three_products_and_uses_checked_date(tmp_path):
     )
 
     assert qa_cover(output).passed is True
+
+    vertical = build_vertical_roundup_card(
+        title="검증 TOP3",
+        products=products,
+        checked_at="2026-09-04",
+        output_path=tmp_path / "vertical.png",
+    )
+    assert qa_vertical_card(vertical).passed is True
+    assert (qa_vertical_card(vertical).width, qa_vertical_card(vertical).height) == (
+        1080,
+        1920,
+    )

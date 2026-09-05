@@ -29,17 +29,22 @@ def configured() -> bool:
 
 
 def _access_token() -> str:
-    response = requests.post(
-        TOKEN_URL,
-        data={
-            "client_id": config.app.get("youtube_oauth_client_id"),
-            "client_secret": config.app.get("youtube_oauth_client_secret"),
-            "refresh_token": config.app.get("youtube_oauth_refresh_token"),
-            "grant_type": "refresh_token",
-        },
-        timeout=30,
-    )
-    response.raise_for_status()
+    try:
+        response = requests.post(
+            TOKEN_URL,
+            data={
+                "client_id": config.app.get("youtube_oauth_client_id"),
+                "client_secret": config.app.get("youtube_oauth_client_secret"),
+                "refresh_token": config.app.get("youtube_oauth_refresh_token"),
+                "grant_type": "refresh_token",
+            },
+            timeout=30,
+        )
+        response.raise_for_status()
+    except requests.RequestException as exc:
+        raise YoutubeEngagementError(
+            f"YouTube OAuth access token 발급 실패: {exc}"
+        ) from exc
     token = str(response.json().get("access_token", "")).strip()
     if not token:
         raise YoutubeEngagementError("YouTube access token 응답이 비었습니다")

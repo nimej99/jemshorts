@@ -16,6 +16,7 @@ sys.path.insert(0, str(ROOT))
 
 from app.config import config  # noqa: E402
 from app.promo import (  # noqa: E402
+    blog_assets,
     commerce_policy,
     commerce_metrics,
     db,
@@ -48,6 +49,18 @@ def _short_name(name: str, limit: int = 18) -> str:
     return name if len(name) <= limit else name[: limit - 1] + "…"
 
 
+def _product_label(product: dict, limit: int = 18) -> str:
+    return _short_name(product.get("shortName") or product["name"], limit)
+
+
+def _roundup_title(collection_title: str, count: int) -> str:
+    return (
+        collection_title
+        if f"TOP{count}" in collection_title.upper()
+        else f"{collection_title} TOP{count}"
+    )
+
+
 def _offers(product: dict) -> list[dict]:
     return sorted(
         (
@@ -78,7 +91,7 @@ def _evidence_hook(products: list[dict], title: str) -> str:
             f"같은 상품인데 판매처만 바꿔도 최대 "
             f"{max(savings):,}원 차이 납니다."
         )
-    return f"리뷰 수만 보고 고르기 전에 {title}의 가격과 구성을 비교했습니다."
+    return f"{title}, 가격과 구성으로 골랐습니다."
 
 
 def _build_script(ranked: list[dict], title: str, evidence_hook: str) -> str:
@@ -88,10 +101,10 @@ def _build_script(ranked: list[dict], title: str, evidence_hook: str) -> str:
         feature = product["summary"].split("·")[0].strip()
         offer = _best_offer(product)
         sentences.append(
-            f"{position}위는 {_short_name(product['name'], 24)}. "
-            f"{feature}, 현재 최저 {offer['priceText']}입니다."
+            f"{position}위 {_product_label(product)}. "
+            f"{feature}, {offer['priceText']}."
         )
-    sentences.append("제품별 최신 정보는 채널 프로필의 추천 제품 링크에서 확인하세요.")
+    sentences.append("최신 가격은 프로필 추천 제품에서 확인하세요.")
     return " ".join(sentences)
 
 
@@ -156,38 +169,59 @@ def main() -> int:
             )
         except ValueError as exc:
             parser.error(str(exc))
-        title = args.title.strip() or f"{collection['title']} TOP{args.top}"
+        default_title = _roundup_title(collection["title"], args.top)
+        title = args.title.strip() or default_title
         template_path = ROOT / "templates-data" / f"commerce-top{args.top}-v2.json"
         template_raw = load_raw(str(template_path))
         template = load_template(str(template_path))
         asset_dir = ROOT / "storage" / "promo_photos" / f"roundup-top{args.top}"
         downloaded = {item["id"]: _download(item, asset_dir) for item in selected}
+        vertical_card = blog_assets.build_vertical_roundup_card(
+            title=title,
+            products=[
+                {
+                    "name": _product_label(item, 19),
+                    "feature": item["summary"].split("·")[0].strip(),
+                    "priceText": _best_offer(item)["priceText"],
+                    "image_path": downloaded[item["id"]],
+                }
+                for item in selected
+            ],
+            checked_at=max(
+                _best_offer(item)["checkedAt"] for item in selected
+            ),
+            output_path=asset_dir / "vertical-top-card.png",
+        )
+        card_qa = blog_assets.qa_vertical_card(vertical_card)
+        if not card_qa.passed:
+            raise RuntimeError(f"TOP 비교 카드 QA 실패: {card_qa.failures}")
 
         # 훅 → 최하위부터 1위 → CTA 화면 순서에 맞춘다.
         descending = list(reversed(selected))
-        photos = [downloaded[descending[0]["id"]]]
+        photos = [str(vertical_card)]
         photos.extend(downloaded[item["id"]] for item in descending)
-        photos.append(downloaded[selected[0]["id"]])
+        photos.append(str(vertical_card))
         kit = BrandKit(
             business_name=title,
             description=" / ".join(item["summary"] for item in selected),
             photos=photos,
             promotion_links=[
                 PromotionLink(
-                    label=f"{_short_name(item['name'])} 최저가",
+                    label=f"{_product_label(item)} 최저가",
                     url=_best_offer(item)["affiliateUrl"],
                 )
                 for item in selected
             ],
-            source="commerce-roundup",
+            source="mixed",
         )
         variables = {
             "roundup_title": title,
             "evidence_hook": _evidence_hook(selected, title),
+            "hook_headline": f"가격·기능 비교 TOP{args.top}",
             "cta_text": "채널 프로필 추천 제품",
         }
         for rank, item in enumerate(selected, start=1):
-            variables[f"product_{rank}"] = _short_name(item["name"])
+            variables[f"product_{rank}"] = _product_label(item)
         script = _build_script(selected, title, variables["evidence_hook"])
         local_dir = utils.storage_dir("local_videos", create=True)
         plan = pipeline.plan_render(

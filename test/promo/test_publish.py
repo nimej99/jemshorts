@@ -84,6 +84,22 @@ def test_postiz_upload_then_post(postiz_config, monkeypatch, tmp_path):
         return _Resp([{"postId": "post-1"}])
 
     monkeypatch.setattr(publish.requests, "post", fake_post)
+    monkeypatch.setattr(
+        publish.requests,
+        "get",
+        lambda *args, **kwargs: _Resp(
+            {
+                "posts": [
+                    {
+                        "id": "post-1",
+                        "state": "PUBLISHED",
+                        "releaseURL": "https://youtube.test/watch?v=1",
+                        "releaseId": "1",
+                    }
+                ]
+            }
+        ),
+    )
 
     result = publish.publish_video(
         str(video), "제목" * 60, "설명 #태그", ["태그"], privacy_status="public"
@@ -91,6 +107,7 @@ def test_postiz_upload_then_post(postiz_config, monkeypatch, tmp_path):
 
     assert result["success"] is True
     assert result["request_id"] == "post-1"
+    assert result["release_id"] == "1"
     assert requests_made[0]["headers"]["Authorization"] == "key-1"
 
     payload = requests_made[1]["json"]
@@ -120,3 +137,42 @@ def test_postiz_http_failure_converges(postiz_config, monkeypatch, tmp_path):
 
     assert result["success"] is False
     assert "refused" in result["error"]
+
+
+def test_postiz_terminal_error_is_not_reported_as_delivered(
+    postiz_config, monkeypatch, tmp_path
+):
+    video = tmp_path / "v.mp4"
+    video.write_bytes(b"video")
+
+    class _Resp:
+        def __init__(self, payload):
+            self._payload = payload
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return self._payload
+
+    monkeypatch.setattr(
+        publish.requests,
+        "post",
+        lambda url, **kwargs: (
+            _Resp({"id": "media-1", "path": "/uploads/v.mp4"})
+            if url.endswith("/upload")
+            else _Resp([{"postId": "post-error"}])
+        ),
+    )
+    monkeypatch.setattr(
+        publish.requests,
+        "get",
+        lambda *args, **kwargs: _Resp(
+            {"posts": [{"id": "post-error", "state": "ERROR"}]}
+        ),
+    )
+
+    result = publish.publish_video(str(video), "제목", "설명", [])
+
+    assert result["success"] is False
+    assert result["request_id"] == "post-error"

@@ -205,6 +205,108 @@ def build_roundup_cover(
     return output
 
 
+def build_vertical_roundup_card(
+    *,
+    title: str,
+    products: list[dict],
+    checked_at: str,
+    output_path: str | Path,
+) -> Path:
+    if len(products) not in ALLOWED_PRODUCT_COUNTS:
+        raise ValueError(
+            f"영상 비교 카드는 상품 3개 또는 5개가 필요합니다 (현재 {len(products)}개)"
+        )
+    canvas = Image.new("RGB", (1080, 1920), "#09101f")
+    draw = ImageDraw.Draw(canvas)
+    draw.text((66, 62), "검색 수요 대비 영상 공급 갭 1위", font=_font(28), fill="#70e6ab")
+    draw.text((66, 115), title, font=_fit(draw, title, 940, 62), fill="white")
+    draw.text((66, 205), "가격 · 리뷰 · 기능으로 비교", font=_font(31), fill="#aebbd2")
+
+    count = len(products)
+    top = 300
+    available = 1390
+    gap = 22
+    card_height = (available - gap * (count - 1)) // count
+    for index, product in enumerate(products, start=1):
+        y0 = top + (index - 1) * (card_height + gap)
+        y1 = y0 + card_height
+        draw.rounded_rectangle((48, y0, 1032, y1), radius=34, fill="#17243f")
+        rank_color = "#ffd45c" if index == 1 else "#8ca0c8"
+        draw.ellipse((78, y0 + 38, 166, y0 + 126), fill=rank_color)
+        rank_font = _font(42, True)
+        rank_box = draw.textbbox((0, 0), str(index), font=rank_font)
+        draw.text(
+            (122 - (rank_box[2] - rank_box[0]) / 2, y0 + 54),
+            str(index),
+            font=rank_font,
+            fill="#111827",
+        )
+        source = Image.open(product["image_path"]).convert("RGB")
+        thumb_size = min(card_height - 46, 340)
+        source.thumbnail((thumb_size, thumb_size), Image.Resampling.LANCZOS)
+        thumb = Image.new("RGB", (thumb_size, thumb_size), "white")
+        thumb.paste(
+            source,
+            ((thumb_size - source.width) // 2, (thumb_size - source.height) // 2),
+        )
+        mask = Image.new("L", thumb.size, 0)
+        ImageDraw.Draw(mask).rounded_rectangle(
+            (0, 0, thumb.width, thumb.height), radius=25, fill=255
+        )
+        canvas.paste(thumb, (190, y0 + (card_height - thumb_size) // 2), mask)
+        text_x = 565
+        draw.text(
+            (text_x, y0 + 64),
+            product["name"],
+            font=_fit(draw, product["name"], 415, 32),
+            fill="white",
+        )
+        draw.text(
+            (text_x, y0 + 128),
+            product["feature"],
+            font=_fit(draw, product["feature"], 415, 25),
+            fill="#b7c4dc",
+        )
+        draw.text(
+            (text_x, y1 - 108),
+            product["priceText"],
+            font=_font(48 if count == 3 else 38, True),
+            fill="#70e6ab",
+        )
+    draw.rounded_rectangle((95, 1740, 985, 1844), radius=52, fill="#253659")
+    footer = f"광고 · {checked_at.replace('-', '.')} 확인가 · 프로필에서 최신가 확인"
+    footer_font = _fit(draw, footer, 830, 29)
+    footer_box = draw.textbbox((0, 0), footer, font=footer_font)
+    draw.text(
+        ((1080 - (footer_box[2] - footer_box[0])) / 2, 1773),
+        footer,
+        font=footer_font,
+        fill="#e7edfa",
+    )
+    output = Path(output_path)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    canvas.save(output, format="PNG", optimize=True)
+    return output
+
+
+def qa_vertical_card(path: str | Path) -> CoverQA:
+    image = Image.open(path).convert("RGB")
+    edges = image.convert("L").filter(ImageFilter.FIND_EDGES)
+    sharpness = round(ImageStat.Stat(edges).var[0], 2)
+    failures = []
+    if image.size != (1080, 1920):
+        failures.append(f"해상도 {image.width}x{image.height}, 기대 1080x1920")
+    if sharpness < 100:
+        failures.append(f"선명도 부족: {sharpness}")
+    return CoverQA(
+        passed=not failures,
+        width=image.width,
+        height=image.height,
+        sharpness=sharpness,
+        failures=tuple(failures),
+    )
+
+
 def qa_cover(path: str | Path) -> CoverQA:
     image = Image.open(path).convert("RGB")
     edges = image.convert("L").filter(ImageFilter.FIND_EDGES)

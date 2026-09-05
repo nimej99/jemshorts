@@ -20,7 +20,8 @@ config:
 from __future__ import annotations
 
 import os
-from datetime import datetime, timezone
+import time
+from datetime import datetime, timedelta, timezone
 from urllib.parse import urlparse
 
 import requests
@@ -31,6 +32,7 @@ from app.config import config
 BACKEND_UPLOAD_POST = "upload_post"
 BACKEND_POSTIZ = "postiz"
 _POSTIZ_TIMEOUT_S = 300
+_POSTIZ_POLL_INTERVAL_S = 5
 
 
 def backend() -> str:
@@ -47,6 +49,54 @@ def _postiz_config() -> tuple[str, str, str] | None:
     if not base or not api_key or not integration_id:
         return None
     return base, api_key, integration_id
+
+
+class PostizPublishError(RuntimeError):
+    pass
+
+
+def _wait_postiz_post(
+    base: str,
+    api_key: str,
+    post_id: str,
+    *,
+    timeout_s: int = _POSTIZ_TIMEOUT_S,
+    interval_s: int = _POSTIZ_POLL_INTERVAL_S,
+) -> dict:
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        now = datetime.now(timezone.utc)
+        response = requests.get(
+            f"{base}/posts",
+            headers={"Authorization": api_key},
+            params={
+                "startDate": (now - timedelta(days=1)).isoformat(),
+                "endDate": (now + timedelta(days=1)).isoformat(),
+            },
+            timeout=30,
+        )
+        response.raise_for_status()
+        post = next(
+            (
+                item
+                for item in response.json().get("posts", [])
+                if item.get("id") == post_id
+            ),
+            None,
+        )
+        if post:
+            state = str(post.get("state", "")).upper()
+            if state == "PUBLISHED":
+                return post
+            if state == "ERROR":
+                raise PostizPublishError(
+                    "Postiz가 YouTube 게시를 실패했습니다. 연동 재인증과 "
+                    "Postiz 로그를 확인하세요"
+                )
+        time.sleep(interval_s)
+    raise PostizPublishError(
+        f"Postiz 게시가 {timeout_s}초 안에 완료되지 않았습니다: {post_id}"
+    )
 
 
 def _postiz_publish(
@@ -123,7 +173,7 @@ def _postiz_publish(
         )
         post_resp.raise_for_status()
         result = post_resp.json()
-    except (OSError, requests.RequestException, ValueError) as exc:
+    except (OSError, requests.RequestException, ValueError, PostizPublishError) as exc:
         logger.error(f"postiz 업로드 실패: {exc}")
         return {"success": False, "backend": BACKEND_POSTIZ, "error": str(exc)}
 
@@ -133,10 +183,29 @@ def _postiz_publish(
         post_id = (result[0] or {}).get("postId") or (result[0] or {}).get("id")
     elif isinstance(result, dict):
         post_id = result.get("postId") or result.get("id")
+    if not post_id:
+        return {
+            "success": False,
+            "backend": BACKEND_POSTIZ,
+            "error": "Postiz posts 응답에 post id가 없습니다",
+            "raw": result,
+        }
+    try:
+        published = _wait_postiz_post(base, api_key, str(post_id))
+    except (requests.RequestException, PostizPublishError) as exc:
+        logger.error(f"postiz 게시 완료 확인 실패: {exc}")
+        return {
+            "success": False,
+            "backend": BACKEND_POSTIZ,
+            "request_id": post_id,
+            "error": str(exc),
+        }
     return {
         "success": True,
         "backend": BACKEND_POSTIZ,
         "request_id": post_id,
+        "release_url": published.get("releaseURL"),
+        "release_id": published.get("releaseId"),
         "raw": result,
     }
 

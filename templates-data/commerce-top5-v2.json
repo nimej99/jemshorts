@@ -8,7 +8,7 @@
   "voice": { "speed": 1.08 },
   "timing": { "owner": "narration", "tolerance_s": 0.2 },
   "structure": [
-    { "role": "hook", "duration_s": 3, "script_guide": "검증된 가격 차이·구성 차이·반복 리뷰 불만 중 하나를 손해 회피형 한 문장으로 제시", "material_slot": "photo", "headline": { "template": "{evidence_hook}", "show": true }, "shots": [{ "kind": "wide", "motion": "push-in" }, { "kind": "cutin", "crop": "center-zoom" }] },
+    { "role": "hook", "duration_s": 3, "script_guide": "검증된 가격 차이·구성 차이·반복 리뷰 불만 중 하나를 손해 회피형 한 문장으로 제시", "material_slot": "photo", "headline": { "template": "{hook_headline}", "show": true }, "shots": [{ "kind": "wide", "motion": "push-in" }, { "kind": "cutin", "crop": "center-zoom" }] },
     { "role": "body", "duration_s": 4, "script_guide": "5위 상품과 한 가지 장점", "material_slot": "photo", "headline": { "template": "5위 {product_5}", "show": true } },
     { "role": "body", "duration_s": 4, "script_guide": "4위 상품과 한 가지 장점", "material_slot": "photo", "headline": { "template": "4위 {product_4}", "show": true } },
     { "role": "body", "duration_s": 4, "script_guide": "3위 상품과 한 가지 장점", "material_slot": "photo", "headline": { "template": "3위 {product_3}", "show": true } },

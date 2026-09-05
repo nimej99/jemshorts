@@ -1,3 +1,5 @@
+import pytest
+
 from app.config import config
 from app.promo import youtube
 
@@ -64,3 +66,16 @@ def test_waits_for_upload_and_posts_purchase_comment(monkeypatch):
     assert result["video_id"] == "video-1"
     assert result["comment_id"] == "comment-1"
     assert calls["comment"]["snippet"]["topLevelComment"]["snippet"]["textOriginal"] == "구매 링크"
+
+
+def test_access_token_http_failure_is_engagement_error(monkeypatch):
+    monkeypatch.setattr(
+        youtube.requests,
+        "post",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            youtube.requests.ConnectionError("oauth down")
+        ),
+    )
+
+    with pytest.raises(youtube.YoutubeEngagementError, match="access token"):
+        youtube._access_token()
